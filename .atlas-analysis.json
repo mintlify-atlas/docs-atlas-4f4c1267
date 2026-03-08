@@ -1,0 +1,163 @@
+{
+  "projectType": "api-service",
+  "projectName": "Schoolr Backend",
+  "projectDescription": "Educational platform backend with GraphQL APIs for lesson management, payments, chat, and file handling.",
+  "theme": "palm",
+  "primaryColor": "#4F46E5",
+  "lightColor": "#818CF8",
+  "darkColor": "#3730A3",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "introduction",
+              "architecture",
+              "features"
+            ]
+          },
+          {
+            "group": "Getting Started",
+            "pages": [
+              "getting-started/prerequisites",
+              "getting-started/local-setup",
+              "getting-started/configuration",
+              "getting-started/running-services"
+            ]
+          },
+          {
+            "group": "Services",
+            "pages": [
+              "services/datamanagement",
+              "services/chat",
+              "services/filemanager"
+            ]
+          },
+          {
+            "group": "Development",
+            "pages": [
+              "development/project-structure",
+              "development/building",
+              "development/testing",
+              "development/environment-variables"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Authentication",
+            "pages": [
+              "api/authentication/overview",
+              "api/authentication/jwt"
+            ]
+          },
+          {
+            "group": "Accounts",
+            "pages": [
+              "api/accounts/overview",
+              "api/accounts/queries",
+              "api/accounts/mutations"
+            ]
+          },
+          {
+            "group": "Lessons",
+            "pages": [
+              "api/lessons/overview",
+              "api/lessons/queries",
+              "api/lessons/mutations"
+            ]
+          },
+          {
+            "group": "Classrooms",
+            "pages": [
+              "api/classrooms/overview",
+              "api/classrooms/queries",
+              "api/classrooms/mutations"
+            ]
+          },
+          {
+            "group": "Payments",
+            "pages": [
+              "api/payments/overview",
+              "api/payments/stripe",
+              "api/payments/invoices"
+            ]
+          },
+          {
+            "group": "Chat",
+            "pages": [
+              "api/chat/overview",
+              "api/chat/rooms",
+              "api/chat/messages"
+            ]
+          },
+          {
+            "group": "File Management",
+            "pages": [
+              "api/files/overview",
+              "api/files/upload",
+              "api/files/download"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Integrations",
+        "groups": [
+          {
+            "group": "Third-Party Services",
+            "pages": [
+              "integrations/stripe",
+              "integrations/whatsapp",
+              "integrations/novu",
+              "integrations/supertokens",
+              "integrations/minio",
+              "integrations/mqtt"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Deployment",
+        "groups": [
+          {
+            "group": "Production",
+            "pages": [
+              "deployment/overview",
+              "deployment/kubernetes",
+              "deployment/database-migrations",
+              "deployment/monitoring"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "GraphQL API with 38+ resource endpoints",
+    "Multi-service architecture (datamanagement, chat, filemanager)",
+    "Integrated payment processing with Stripe",
+    "Real-time chat system with MQTT messaging",
+    "File storage with MinIO",
+    "JWT authentication with SuperTokens",
+    "Database migrations with Liquibase",
+    "WhatsApp integration for notifications",
+    "Invoice generation with Fatture in Cloud"
+  ],
+  "publicApiSurface": [
+    "GraphQL: Account queries and mutations",
+    "GraphQL: Lesson booking and management",
+    "GraphQL: Classroom operations",
+    "GraphQL: Payment processing",
+    "GraphQL: Chat rooms and messages",
+    "REST: File upload/download endpoints",
+    "REST: Webhook handlers (Stripe, WhatsApp, Novu)",
+    "REST: Health check endpoints"
+  ]
+}
