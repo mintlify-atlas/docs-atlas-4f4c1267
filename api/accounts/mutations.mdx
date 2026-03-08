@@ -1,0 +1,802 @@
+---
+title: "Account Mutations"
+description: "GraphQL mutations for modifying account information"
+---
+
+## Email Verification
+
+### verifyEmailCode
+
+Verify an email address using a one-time code sent to the user.
+
+#### Request
+
+```graphql
+mutation VerifyEmailCode($code: ConsumeCodeDto!) {
+  verifyEmailCode(code: $code) {
+    email
+    phone
+    confirmedEmail
+    confirmedPhone
+    enabled
+    tutorStatus
+  }
+}
+```
+
+#### Parameters
+
+<ParamField body="code" type="ConsumeCodeDto" required>
+  OTP verification code details
+  
+  <Expandable title="ConsumeCodeDto fields">
+    <ParamField body="preAuthSessionId" type="String" required>
+      Session ID from the sendEmailCode response
+    </ParamField>
+    <ParamField body="deviceId" type="String" required>
+      Device ID from the sendEmailCode response
+    </ParamField>
+    <ParamField body="userInputCode" type="String" required>
+      The OTP code entered by the user
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+#### Response
+
+Returns a `CheckAccountDto` with updated verification status.
+
+#### Authentication
+
+<Check>Requires authentication</Check>
+
+#### Example
+
+```json
+{
+  "code": {
+    "preAuthSessionId": "abc123def456",
+    "deviceId": "device789",
+    "userInputCode": "123456"
+  }
+}
+```
+
+---
+
+### verifyParentEmailCode
+
+Verify a parent account's email using a one-time code.
+
+#### Request
+
+```graphql
+mutation VerifyParentEmailCode($code: ConsumeCodeDto!, $parentUUID: String!) {
+  verifyParentEmailCode(code: $code, parentUUID: $parentUUID) {
+    email
+    confirmedEmail
+    enabled
+  }
+}
+```
+
+#### Parameters
+
+<ParamField body="code" type="ConsumeCodeDto" required>
+  OTP verification code details
+</ParamField>
+
+<ParamField body="parentUUID" type="String" required>
+  UUID of the parent account to verify
+</ParamField>
+
+#### Authentication
+
+<Check>Requires authentication (student account)</Check>
+
+---
+
+### sendEmailCode
+
+Send a verification code to the user's pending email address.
+
+#### Request
+
+```graphql
+mutation {
+  sendEmailCode {
+    status
+    preAuthSessionId
+    deviceId
+    timeCreated
+    codeLifetime
+  }
+}
+```
+
+#### Response
+
+<ResponseField name="status" type="String">
+  Status of the code sending operation
+</ResponseField>
+
+<ResponseField name="preAuthSessionId" type="String">
+  Session ID to use when verifying the code
+</ResponseField>
+
+<ResponseField name="deviceId" type="String">
+  Device ID to use when verifying the code
+</ResponseField>
+
+<ResponseField name="timeCreated" type="Long">
+  Timestamp when the code was created (milliseconds)
+</ResponseField>
+
+<ResponseField name="codeLifetime" type="Long">
+  How long the code is valid (milliseconds)
+</ResponseField>
+
+#### Authentication
+
+<Check>Requires authentication</Check>
+
+#### Notes
+
+- Sends code to the `email_to_be_confirmed` field
+- Code is typically valid for 5-15 minutes
+
+---
+
+### sendParentEmailCode
+
+Send a verification code to a parent account's pending email address.
+
+#### Request
+
+```graphql
+mutation SendParentEmailCode($parentUUID: String!) {
+  sendParentEmailCode(parentUUID: $parentUUID) {
+    status
+    preAuthSessionId
+    deviceId
+    timeCreated
+    codeLifetime
+  }
+}
+```
+
+#### Parameters
+
+<ParamField body="parentUUID" type="String" required>
+  UUID of the parent account
+</ParamField>
+
+#### Authentication
+
+<Check>Requires authentication (student account)</Check>
+
+---
+
+### updateEmail
+
+Update the user's email address (triggers verification flow).
+
+#### Request
+
+```graphql
+mutation UpdateEmail($updatedEmail: String!) {
+  updateEmail(updatedEmail: $updatedEmail) {
+    status
+    preAuthSessionId
+    deviceId
+    timeCreated
+    codeLifetime
+  }
+}
+```
+
+#### Parameters
+
+<ParamField body="updatedEmail" type="String" required>
+  New email address to set
+</ParamField>
+
+#### Response
+
+Returns a `SendCodeOutDto` with verification code details.
+
+#### Authentication
+
+<Check>Requires authentication</Check>
+
+#### Flow
+
+1. Call `updateEmail` with new email
+2. Receive verification code details
+3. User receives OTP code via email
+4. Call `verifyEmailCode` with the code to confirm
+
+---
+
+### updateParentEmail
+
+Update a parent account's email address.
+
+#### Request
+
+```graphql
+mutation UpdateParentEmail($parentUUID: String!, $updatedEmail: String!) {
+  updateParentEmail(parentUUID: $parentUUID, updatedEmail: $updatedEmail) {
+    status
+    preAuthSessionId
+    deviceId
+    timeCreated
+    codeLifetime
+  }
+}
+```
+
+#### Parameters
+
+<ParamField body="parentUUID" type="String" required>
+  UUID of the parent account
+</ParamField>
+
+<ParamField body="updatedEmail" type="String" required>
+  New email address to set
+</ParamField>
+
+#### Authentication
+
+<Check>Requires authentication (student account)</Check>
+
+---
+
+## Phone Verification
+
+### verifyPhoneCode
+
+Verify a phone number using a one-time code sent via SMS.
+
+#### Request
+
+```graphql
+mutation VerifyPhoneCode($code: ConsumeCodeDto!) {
+  verifyPhoneCode(code: $code) {
+    phone
+    confirmedPhone
+    enabled
+  }
+}
+```
+
+#### Parameters
+
+<ParamField body="code" type="ConsumeCodeDto" required>
+  OTP verification code details (same structure as email verification)
+</ParamField>
+
+#### Authentication
+
+<Check>Requires authentication</Check>
+
+---
+
+### verifyParentPhoneCode
+
+Verify a parent account's phone number using a one-time code.
+
+#### Request
+
+```graphql
+mutation VerifyParentPhoneCode($code: ConsumeCodeDto!, $parentUUID: String!) {
+  verifyParentPhoneCode(code: $code, parentUUID: $parentUUID) {
+    phone
+    confirmedPhone
+    enabled
+  }
+}
+```
+
+#### Parameters
+
+<ParamField body="code" type="ConsumeCodeDto" required>
+  OTP verification code details
+</ParamField>
+
+<ParamField body="parentUUID" type="String" required>
+  UUID of the parent account
+</ParamField>
+
+#### Authentication
+
+<Check>Requires authentication (student account)</Check>
+
+---
+
+### sendPhoneCode
+
+Send a verification code to the user's pending phone number via SMS.
+
+#### Request
+
+```graphql
+mutation {
+  sendPhoneCode {
+    status
+    preAuthSessionId
+    deviceId
+    timeCreated
+    codeLifetime
+  }
+}
+```
+
+#### Response
+
+Returns a `SendCodeOutDto` with verification code details.
+
+#### Authentication
+
+<Check>Requires authentication</Check>
+
+---
+
+### sendParentPhoneCode
+
+Send a verification code to a parent account's pending phone number.
+
+#### Request
+
+```graphql
+mutation SendParentPhoneCode($parentUUID: String!) {
+  sendParentPhoneCode(parentUUID: $parentUUID) {
+    status
+    preAuthSessionId
+    deviceId
+    timeCreated
+    codeLifetime
+  }
+}
+```
+
+#### Parameters
+
+<ParamField body="parentUUID" type="String" required>
+  UUID of the parent account
+</ParamField>
+
+#### Authentication
+
+<Check>Requires authentication (student account)</Check>
+
+---
+
+### updateUserPhone
+
+Update the user's phone number (triggers verification flow).
+
+#### Request
+
+```graphql
+mutation UpdateUserPhone($updatedPhone: String!) {
+  updateUserPhone(updatedPhone: $updatedPhone) {
+    status
+    preAuthSessionId
+    deviceId
+    timeCreated
+    codeLifetime
+  }
+}
+```
+
+#### Parameters
+
+<ParamField body="updatedPhone" type="String" required>
+  New phone number (format: +[country code][number], e.g., "+393331234567")
+</ParamField>
+
+#### Authentication
+
+<Check>Requires authentication</Check>
+
+---
+
+### updateParentUserPhone
+
+Update a parent account's phone number.
+
+#### Request
+
+```graphql
+mutation UpdateParentUserPhone($updatedPhone: String!, $parentUUID: String!) {
+  updateParentUserPhone(updatedPhone: $updatedPhone, parentUUID: $parentUUID) {
+    status
+    preAuthSessionId
+    deviceId
+    timeCreated
+    codeLifetime
+  }
+}
+```
+
+#### Parameters
+
+<ParamField body="updatedPhone" type="String" required>
+  New phone number
+</ParamField>
+
+<ParamField body="parentUUID" type="String" required>
+  UUID of the parent account
+</ParamField>
+
+#### Authentication
+
+<Check>Requires authentication (student account)</Check>
+
+---
+
+## Profile Management
+
+### updateAccount
+
+Update the authenticated user's account information.
+
+#### Request
+
+```graphql
+mutation UpdateAccount($data: AccountDto!) {
+  updateAccount(data: $data) {
+    uuid
+    first_name
+    last_name
+    profilePhotoURL
+  }
+}
+```
+
+#### Parameters
+
+<ParamField body="data" type="AccountDto" required>
+  Account data to update
+  
+  <Expandable title="AccountDto fields">
+    <ParamField body="uuid" type="String">
+      Account UUID (read-only)
+    </ParamField>
+    <ParamField body="firstName" type="String">
+      Updated first name
+    </ParamField>
+    <ParamField body="lastName" type="String">
+      Updated last name
+    </ParamField>
+    <ParamField body="profilePhotoURL" type="String">
+      Updated profile photo URL
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+#### Response
+
+Returns the updated `Account` object.
+
+#### Authentication
+
+<Check>Requires authentication</Check>
+
+#### Example
+
+```json
+{
+  "data": {
+    "firstName": "Mario",
+    "lastName": "Rossi",
+    "profilePhotoURL": "https://cdn.schoolr.it/profiles/new-photo.jpg"
+  }
+}
+```
+
+---
+
+### updateParentAccount
+
+Update a parent account's information.
+
+#### Request
+
+```graphql
+mutation UpdateParentAccount($data: AccountDto!, $parentUUID: String!) {
+  updateParentAccount(data: $data, parentUUID: $parentUUID) {
+    uuid
+    first_name
+    last_name
+    profilePhotoURL
+  }
+}
+```
+
+#### Parameters
+
+<ParamField body="data" type="AccountDto" required>
+  Account data to update
+</ParamField>
+
+<ParamField body="parentUUID" type="String" required>
+  UUID of the parent account
+</ParamField>
+
+#### Authentication
+
+<Check>Requires authentication (student account)</Check>
+
+---
+
+## Password Management
+
+### resetPassword
+
+Reset the password for an authenticated user.
+
+#### Request
+
+```graphql
+mutation ResetPassword($password: String!) {
+  resetPassword(password: $password) {
+    message
+    status
+  }
+}
+```
+
+#### Parameters
+
+<ParamField body="password" type="String" required>
+  New password to set
+</ParamField>
+
+#### Response
+
+<ResponseField name="message" type="String" required>
+  Success or error message
+</ResponseField>
+
+<ResponseField name="status" type="Status" required>
+  SUCCESS or ERROR
+</ResponseField>
+
+#### Authentication
+
+<Check>Requires authentication via @Authenticated annotation</Check>
+
+---
+
+### resetParentPassword
+
+Reset the password for a parent account.
+
+#### Request
+
+```graphql
+mutation ResetParentPassword($password: String!, $parentUUID: String!) {
+  resetParentPassword(password: $password, parentUUID: $parentUUID) {
+    message
+    status
+  }
+}
+```
+
+#### Parameters
+
+<ParamField body="password" type="String" required>
+  New password to set
+</ParamField>
+
+<ParamField body="parentUUID" type="String" required>
+  UUID of the parent account
+</ParamField>
+
+#### Authentication
+
+<Check>Requires authentication (student account)</Check>
+
+---
+
+### forgotPassword
+
+Initiate a password reset flow by sending a reset link to the user's email.
+
+#### Request
+
+```graphql
+mutation ForgotPassword($email: String!) {
+  forgotPassword(email: $email) {
+    message
+    status
+  }
+}
+```
+
+#### Parameters
+
+<ParamField body="email" type="String" required>
+  Email address of the account to reset
+</ParamField>
+
+#### Response
+
+<ResponseField name="message" type="String" required>
+  "Reset password link sent" on success
+</ResponseField>
+
+<ResponseField name="status" type="Status" required>
+  SUCCESS if email was sent, ERROR otherwise
+</ResponseField>
+
+#### Authentication
+
+<Warning>No authentication required - public endpoint</Warning>
+
+#### Example
+
+```json
+{
+  "email": "user@example.com"
+}
+```
+
+---
+
+### changePassword
+
+Change password using a reset token received via email.
+
+#### Request
+
+```graphql
+mutation ChangePassword($data: ChangePasswordDto!) {
+  changePassword(data: $data) {
+    message
+    status
+  }
+}
+```
+
+#### Parameters
+
+<ParamField body="data" type="ChangePasswordDto" required>
+  Password change data
+  
+  <Expandable title="ChangePasswordDto fields">
+    <ParamField body="token" type="String" required>
+      Reset token from the password reset email
+    </ParamField>
+    <ParamField body="newPassword" type="String" required>
+      New password to set
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+#### Response
+
+<ResponseField name="message" type="String" required>
+  "Password changed" on success
+</ResponseField>
+
+<ResponseField name="status" type="Status" required>
+  SUCCESS or ERROR
+</ResponseField>
+
+#### Authentication
+
+<Warning>No authentication required - uses token-based verification</Warning>
+
+#### Flow
+
+1. User calls `forgotPassword` with their email
+2. User receives email with reset token
+3. User calls `changePassword` with token and new password
+
+---
+
+## Account Management
+
+### deleteAccount
+
+Permanently delete the authenticated user's account.
+
+#### Request
+
+```graphql
+mutation {
+  deleteAccount {
+    message
+    status
+  }
+}
+```
+
+#### Response
+
+Returns a `GenericResponse` indicating success or failure.
+
+#### Authentication
+
+<Check>Requires authentication</Check>
+
+#### Warning
+
+<Warning>This action is irreversible. All account data will be permanently deleted.</Warning>
+
+---
+
+### recoverAccount
+
+Recover an account by sending recovery instructions to the email.
+
+#### Request
+
+```graphql
+mutation RecoverAccount($data: RecoverAccountDto!) {
+  recoverAccount(data: $data) {
+    message
+    status
+  }
+}
+```
+
+#### Parameters
+
+<ParamField body="data" type="RecoverAccountDto" required>
+  Recovery request data
+  
+  <Expandable title="RecoverAccountDto fields">
+    <ParamField body="email" type="String" required>
+      Email address of the account to recover
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+#### Response
+
+<ResponseField name="message" type="String" required>
+  Confirmation message including the email address
+</ResponseField>
+
+<ResponseField name="status" type="Status" required>
+  SUCCESS
+</ResponseField>
+
+#### Authentication
+
+<Warning>No authentication required</Warning>
+
+#### Example
+
+```json
+{
+  "data": {
+    "email": "user@example.com"
+  }
+}
+```
+
+---
+
+## Parent Account Management
+
+All parent-related mutations require the authenticated user to be a student account with proper authorization to manage the specified parent account. The `parentUUID` parameter identifies which parent account to operate on.
+
+### Parent Account Flow
+
+1. Student creates or links a parent account
+2. Parent email/phone is set using `updateParentEmail` or `updateParentUserPhone`
+3. Verification codes are sent using `sendParentEmailCode` or `sendParentPhoneCode`
+4. Codes are verified using `verifyParentEmailCode` or `verifyParentPhoneCode`
+5. Student can update parent profile with `updateParentAccount`
+6. Student can reset parent password with `resetParentPassword`
+
+### Security Notes
+
+- Only the linked student can manage their parent accounts
+- Parent accounts cannot manage themselves through these endpoints
+- Each operation validates the parent-student relationship

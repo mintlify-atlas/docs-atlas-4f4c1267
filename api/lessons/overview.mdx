@@ -1,0 +1,87 @@
+---
+title: 'Lessons API Overview'
+description: 'Manage lessons, bookings, and lesson rooms in the Schoolr platform'
+---
+
+## Introduction
+
+The Lessons API provides comprehensive functionality for managing lessons in the Schoolr platform. It includes operations for creating, updating, and canceling lessons, as well as a complete booking flow for students and tutors.
+
+## Key Features
+
+- **Lesson Management**: Create, update, and cancel lessons
+- **Booking Flow**: Multi-step lesson booking process with payment integration
+- **Lesson Rooms**: Virtual classroom management with video capabilities
+- **Payment Modes**: Support for FREE, PAID, and SINGLE payment types
+- **Lesson States**: Track lesson status through its lifecycle
+- **Time Validation**: Check lesson time availability before booking
+
+## Lesson Status States
+
+Lessons in Schoolr can have the following status values:
+
+- `PENDING` - Lesson is awaiting confirmation from the tutor
+- `CONFIRMED` - Lesson has been accepted by the tutor
+- `CANCELED` - Lesson was canceled by student or admin
+- `REJECTED` - Lesson was refused by the tutor
+- `COMPLETED` - Lesson has finished
+
+## Payment Modes
+
+The platform supports multiple payment modes:
+
+- `FREE` - No payment required (first lesson or promotional)
+- `PAID` - Payment required through the platform
+- `SINGLE` - One-time payment for a single lesson
+
+## Lesson Types
+
+Lessons can be configured for different classroom types:
+
+- `INDIVIDUAL` - One-on-one tutoring session
+- `GROUP` - Group lessons with multiple students
+- `HOME` - In-person lessons at student's location
+
+## Booking Workflow
+
+<Steps>
+  <Step title="Initialize Booking">
+    Call `initBookLesson` to validate prerequisites and get lesson details including rates, available payment methods, and student information.
+  </Step>
+  
+  <Step title="Book the Lesson">
+    Use one of the booking mutations based on the lesson type:
+    - `bookLesson` - Standard paid lesson booking
+    - `bookFreeLesson` - Free lesson booking (no payment)
+    - `bookTutorLesson` - Tutor-initiated booking
+  </Step>
+  
+  <Step title="Payment Processing">
+    If payment is required, complete the payment transaction using the returned payment UUID and transaction details.
+  </Step>
+  
+  <Step title="Tutor Acceptance">
+    The tutor must accept or refuse the lesson using:
+    - `acceptLesson` - Confirms the lesson (status → CONFIRMED)
+    - `refuseLesson` - Rejects the lesson (status → REJECTED)
+  </Step>
+  
+  <Step title="Join Lesson Room">
+    Once confirmed, participants can join using `lessonRoom` query to get virtual classroom access.
+  </Step>
+</Steps>
+
+## Authentication
+
+Most lesson operations require authentication:
+
+- **Admin Access Required**: `createLesson`, `updateLesson`
+- **Authenticated Required**: `bookLesson`, `acceptLesson`, `retrieveLessonRoom`
+- **Public Access**: Query operations like `lessons`, `lessonByUUID`
+
+## Related Resources
+
+- [Lesson Queries](/api/lessons/queries) - All available GraphQL queries
+- [Lesson Mutations](/api/lessons/mutations) - All available GraphQL mutations
+- [Classrooms API](/api/classrooms/overview) - Classroom management
+- [Payments API](/api/payments/overview) - Payment processing

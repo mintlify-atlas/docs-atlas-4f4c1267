@@ -1,0 +1,143 @@
+---
+title: "Accounts API Overview"
+description: "Manage user accounts, authentication, and profile information"
+---
+
+The Accounts API provides comprehensive functionality for managing user accounts in the Schoolr platform. This includes account creation, profile management, email and phone verification, password management, and account recovery.
+
+## Features
+
+### Authentication & Verification
+- Email verification with OTP codes
+- Phone number verification with OTP codes
+- Multi-factor authentication support
+- Parent account verification for student users
+
+### Profile Management
+- Update account information (name, profile photo)
+- Manage email and phone number changes
+- Support for both primary and parent accounts
+- Account deletion
+
+### Password Management
+- Password reset for authenticated users
+- Forgot password flow with email tokens
+- Password change with token verification
+- Parent account password management
+
+### Account Recovery
+- Legacy account migration
+- Account recovery via email
+- Email and phone availability checks
+
+## Authentication
+
+Most account operations require authentication. The API uses session-based authentication with JWT tokens managed by SuperTokens. 
+
+Authenticated requests must include valid session cookies or authorization headers. The `@Authenticated` annotation indicates endpoints that require authentication, though most account endpoints use the `identityUtil.authAccount` pattern for authorization.
+
+## Account Types
+
+The platform supports different account types through inheritance:
+- **Student** - Student accounts with parent management capabilities
+- **Tutor** - Tutor accounts with additional status and diploma verification
+- **Admin** - Administrative accounts
+- **Parent** - Parent/guardian accounts linked to students
+
+## Common Response Types
+
+### GenericResponse
+
+Used for simple success/error responses:
+
+```graphql
+type GenericResponse {
+  message: String!
+  status: Status!
+}
+
+enum Status {
+  SUCCESS
+  ERROR
+}
+```
+
+### Account
+
+Core account entity:
+
+```graphql
+type Account {
+  id: Long!
+  uuid: String!
+  email: String
+  phone: String
+  email_to_be_confirmed: String
+  phone_to_be_confirmed: String
+  first_name: String
+  last_name: String
+  username: String
+  profilePhotoURL: String
+  confirmed_email: DateTime
+  confirmed_phone: DateTime
+  customer_id: String
+  birth_date: Date
+  full_name: String
+  accountType: String
+}
+```
+
+### AccountExtended
+
+Extended account information with verification status:
+
+```graphql
+type AccountExtended {
+  account: Account
+  enabled: Boolean
+  tutorStatus: TutorStatus
+  diplomaEnabled: Boolean
+}
+```
+
+### CheckAccountDto
+
+Account verification status:
+
+```graphql
+type CheckAccountDto {
+  email: String
+  phone: String
+  email_to_be_confirmed: String
+  phone_to_be_confirmed: String
+  confirmedEmail: Boolean
+  confirmedPhone: Boolean
+  enabled: Boolean
+  tutorStatus: TutorStatus
+  checkOrder: [String!]!
+  accountDto: AccountDto
+  diplomaEnabled: Boolean
+}
+```
+
+## Error Handling
+
+The API returns exceptions as GraphQL errors with descriptive messages:
+
+- **Account not found** - When the requested account doesn't exist
+- **Verification failed** - When OTP codes are invalid or expired
+- **Duplicate email/phone** - When email or phone is already in use
+- **Invalid parent** - When parent account relationship is invalid
+
+All errors are returned in standard GraphQL error format with appropriate error messages.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Queries" icon="magnifying-glass" href="./queries">
+    View all account-related queries
+  </Card>
+  <Card title="Mutations" icon="pen-to-square" href="./mutations">
+    View all account-related mutations
+  </Card>
+</CardGroup>

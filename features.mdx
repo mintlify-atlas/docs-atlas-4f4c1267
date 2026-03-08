@@ -1,0 +1,811 @@
+---
+title: Features & Integrations
+description: Comprehensive guide to Schoolr Backend features and third-party integrations
+---
+
+# Features & Integrations
+
+Schoolor Backend provides a rich set of features powered by modern integrations and cloud-native technologies. This guide covers the key capabilities across all three microservices.
+
+---
+
+## Authentication & Authorization
+
+### SuperTokens Integration
+
+Schoolor uses **SuperTokens** for modern, secure authentication:
+
+```yaml
+supertoken:
+  uri: https://auth.example.com
+  cdi-version: 2.20
+  api-key: ${AUTH_API_KEY}
+```
+
+**Features:**
+- Session management with refresh tokens
+- JWT-based authentication
+- Multi-tenant support
+- Social login support
+- Email/password authentication
+
+### JWT Validation
+
+All services validate JWTs using SmallRye JWT:
+
+**Development:**
+```yaml
+mp:
+  jwt:
+    verify:
+      publickey:
+        location: https://supertokens.example.com/.well-known/jwks.json
+```
+
+**Production:**
+```yaml
+mp:
+  jwt:
+    verify:
+      publickey:
+        location: /keys/publickey-prod.pem
+```
+
+<Note>
+  In development, JWT keys are fetched from SuperTokens JWKS endpoint. In production, use local PEM files for better performance and reliability.
+</Note>
+
+### Example: Protected GraphQL Query
+
+```kotlin
+@GraphQLApi
+class UserResource {
+    
+    @Query
+    @RolesAllowed("user", "admin")
+    fun getCurrentUser(@Context jwt: JsonWebToken): User {
+        val userId = jwt.subject
+        return userService.findById(userId)
+    }
+}
+```
+
+---
+
+## Payment Processing
+
+### Stripe Integration
+
+Full Stripe integration for payment processing in the **Data Management** service:
+
+```yaml
+stripe:
+  secret_key: ${STRIPE_SECRET_KEY}
+  endpoint_secret: ${STRIPE_ENDPOINT_SECRET}
+```
+
+**Capabilities:**
+
+<CardGroup cols={2}>
+  <Card title="Subscriptions" icon="rotate">
+    Recurring billing for educational services
+  </Card>
+  <Card title="One-time Payments" icon="credit-card">
+    Single lesson or content purchases
+  </Card>
+  <Card title="Webhooks" icon="webhook">
+    Real-time payment event processing
+  </Card>
+  <Card title="Payment Methods" icon="wallet">
+    Cards, SEPA, and local payment methods
+  </Card>
+</CardGroup>
+
+### Webhook Handling
+
+Stripe webhooks are validated using the endpoint secret:
+
+```kotlin
+@POST
+@Path("/webhooks/stripe")
+fun handleStripeWebhook(
+    @HeaderParam("Stripe-Signature") signature: String,
+    payload: String
+): Response {
+    val event = Webhook.constructEvent(
+        payload, 
+        signature, 
+        stripeEndpointSecret
+    )
+    
+    when (event.type) {
+        "payment_intent.succeeded" -> handlePaymentSuccess(event)
+        "customer.subscription.updated" -> handleSubscriptionUpdate(event)
+        // ...
+    }
+    
+    return Response.ok().build()
+}
+```
+
+<Warning>
+  Always validate webhook signatures to ensure events are genuinely from Stripe and not spoofed.
+</Warning>
+
+---
+
+## Messaging & Notifications
+
+### MQTT Messaging
+
+All services use **MQTT** for asynchronous, event-driven communication:
+
+```yaml
+mqtt:
+  host: ${MQTT_HOST}
+  port: ${MQTT_PORT:1883}
+  connector: smallrye-mqtt
+  enabled: ${MQTT_ENABLED:true}
+```
+
+**Use Cases:**
+- Real-time chat message delivery
+- File upload notifications
+- Cross-service event propagation
+- Lesson request notifications
+
+### SmallRye Reactive Messaging
+
+MQTT integration uses SmallRye Reactive Messaging:
+
+```kotlin
+@ApplicationScoped
+class ChatMessageProcessor {
+    
+    @Incoming("chat-messages")
+    @Outgoing("chat-messages-out")
+    fun processMessage(message: ChatMessage): ChatMessage {
+        // Process and transform message
+        logger.info { "Processing message: ${message.id}" }
+        return message.copy(processed = true)
+    }
+}
+```
+
+### Shared Subscriptions
+
+For load balancing across multiple instances:
+
+```yaml
+topic: $share/g/chat-message/#
+```
+
+The `$share/g/` prefix enables MQTT shared subscriptions, distributing messages across consumer instances.
+
+<Info>
+  Shared subscriptions ensure only one instance processes each message, enabling horizontal scaling without duplicate processing.
+</Info>
+
+### Novu Notifications
+
+Multi-channel notification delivery:
+
+```yaml
+novu:
+  apikey: ${NOVU_API_KEY}
+  serverUrl: ${NOVU_SERVER_URL}
+```
+
+**Channels:**
+- Email notifications
+- SMS alerts
+- Push notifications
+- In-app notifications
+
+**Example:**
+
+```kotlin
+fun sendLessonReminder(userId: String, lessonId: String) {
+    novuClient.trigger(
+        name = "lesson-reminder",
+        to = userId,
+        payload = mapOf(
+            "lessonId" to lessonId,
+            "lessonTime" to lesson.startTime
+        )
+    )
+}
+```
+
+---
+
+## Communication Integrations
+
+### WhatsApp Business API
+
+Direct WhatsApp messaging integration:
+
+```yaml
+whatsapp:
+  enabled: true
+  apikey: ${WHATSAPP_API_KEY}
+  applicationId: ${WHATSAPP_APPLICATION_ID}
+  endpointSecret: ${WHATSAPP_ENDPOINT_SECRET}
+```
+
+**Features:**
+- Template messages (pre-approved by WhatsApp)
+- Session messages (24-hour window)
+- Media attachments
+- Webhook handling for incoming messages
+
+**Example: Send Template Message**
+
+```kotlin
+fun sendLessonConfirmation(phoneNumber: String, studentName: String, lessonDate: String) {
+    whatsappClient.sendTemplate(
+        to = phoneNumber,
+        template = "lesson_confirmation",
+        parameters = listOf(
+            studentName,
+            lessonDate
+        )
+    )
+}
+```
+
+<Note>
+  WhatsApp template messages must be pre-approved by WhatsApp. Design templates carefully to meet WhatsApp's guidelines.
+</Note>
+
+### SMS Service
+
+Custom SMS integration for OTP and notifications:
+
+```yaml
+sms:
+  url: ${SMS_URL}
+  username: ${SMS_USERNAME}
+  password: ${SMS_PASSWORD}
+```
+
+**Use Cases:**
+- One-time passwords (OTP)
+- Lesson reminders
+- Payment confirmations
+- Emergency notifications
+
+---
+
+## File Management
+
+### MinIO Object Storage
+
+S3-compatible object storage for all file operations:
+
+```yaml
+minio:
+  host: ${MINIO_HOST}
+  port: ${MINIO_PORT:9000}
+  bucketname: schoolr
+  username: ${MINIO_USERNAME}
+  password: ${MINIO_PASSWORD}
+```
+
+**Features:**
+
+<CardGroup cols={2}>
+  <Card title="Large Files" icon="file-arrow-up">
+    Support for files up to 300MB
+  </Card>
+  <Card title="Secure Access" icon="shield">
+    JWT-authenticated uploads and downloads
+  </Card>
+  <Card title="S3 Compatibility" icon="aws">
+    Standard S3 API for easy migration
+  </Card>
+  <Card title="Bucket Management" icon="folder-tree">
+    Organized file structure by type
+  </Card>
+</CardGroup>
+
+### File Upload Flow
+
+```kotlin
+@POST
+@Path("/upload")
+@Consumes(MediaType.MULTIPART_FORM_DATA)
+fun uploadFile(
+    @MultipartForm fileUpload: FileUpload,
+    @Context jwt: JsonWebToken
+): FileMetadata {
+    // Validate file size and type
+    validateFile(fileUpload)
+    
+    // Generate unique filename
+    val fileName = "${UUID.randomUUID()}-${fileUpload.fileName}"
+    
+    // Upload to MinIO
+    val url = minioService.upload(
+        bucket = "schoolr",
+        objectName = fileName,
+        inputStream = fileUpload.data,
+        contentType = fileUpload.contentType
+    )
+    
+    // Publish MQTT event
+    fileEventPublisher.publishUpload(fileName, url, jwt.subject)
+    
+    return FileMetadata(
+        id = UUID.randomUUID().toString(),
+        fileName = fileName,
+        url = url,
+        size = fileUpload.size,
+        uploadedBy = jwt.subject
+    )
+}
+```
+
+### File Size Limits
+
+```yaml
+quarkus:
+  http:
+    limits:
+      max-body-size: 300M
+```
+
+<Warning>
+  Ensure your reverse proxy (nginx, etc.) also supports 300MB uploads:
+  ```nginx
+  client_max_body_size 300M;
+  ```
+</Warning>
+
+---
+
+## Real-time Chat
+
+### GraphQL Subscriptions
+
+Real-time message updates using GraphQL subscriptions:
+
+```kotlin
+@GraphQLApi
+class ChatSubscriptions {
+    
+    @Subscription
+    fun onNewMessage(@Name("roomId") roomId: String): Multi<Message> {
+        return messageService.subscribeToRoom(roomId)
+    }
+}
+```
+
+**Client Example:**
+
+```graphql
+subscription OnNewMessage($roomId: ID!) {
+  onNewMessage(roomId: $roomId) {
+    id
+    content
+    senderId
+    timestamp
+    metadata {
+      attachments
+      edited
+    }
+  }
+}
+```
+
+### Message Persistence
+
+All chat messages are persisted in PostgreSQL:
+
+```kotlin
+@Entity
+@Table(name = "messages")
+class Message : PanacheEntity() {
+    
+    @Column(nullable = false)
+    lateinit var roomId: String
+    
+    @Column(nullable = false)
+    lateinit var senderId: String
+    
+    @Column(columnDefinition = "TEXT")
+    var content: String? = null
+    
+    @Column(nullable = false)
+    lateinit var timestamp: Instant
+    
+    @OneToOne(cascade = [CascadeType.ALL])
+    var metadata: MessageMetadata? = null
+}
+```
+
+### Room Management
+
+**Features:**
+- Create private and group rooms
+- Add/remove subscribers
+- Room metadata (name, avatar, settings)
+- Message history pagination
+- Unread message counts
+
+```kotlin
+fun createRoom(name: String?, subscriberIds: List<String>): Room {
+    val room = Room().apply {
+        this.name = name
+        this.createdAt = Instant.now()
+    }
+    room.persist()
+    
+    // Add subscribers
+    subscriberIds.forEach { userId ->
+        Subscriber().apply {
+            this.roomId = room.id.toString()
+            this.userId = userId
+            this.joinedAt = Instant.now()
+        }.persist()
+    }
+    
+    return room
+}
+```
+
+---
+
+## Database Management
+
+### Liquibase Migrations
+
+Database schema is managed via **Liquibase** changelogs:
+
+```yaml
+quarkus:
+  liquibase:
+    migrate-at-start: true  # Dev only
+    change-log: db/changelog/master.xml
+```
+
+**Directory Structure:**
+
+```
+db/
+└── changelog/
+    ├── master.xml
+    ├── v1.0/
+    │   ├── create-users-table.xml
+    │   ├── create-lessons-table.xml
+    │   └── ...
+    └── v2.0/
+        └── add-room-metadata.xml
+```
+
+### Multiple Databases
+
+Two separate PostgreSQL databases:
+
+**Data Management:**
+```yaml
+jdbc:
+  url: jdbc:postgresql://localhost:5432/schoolr
+```
+
+**Chat:**
+```yaml
+jdbc:
+  url: jdbc:postgresql://localhost:5432/schoolr-chat
+```
+
+<Info>
+  Separate databases provide data isolation, independent scaling, and clearer service boundaries.
+</Info>
+
+### Example Migration
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+    http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.0.xsd">
+
+    <changeSet id="1" author="dev">
+        <createTable tableName="rooms">
+            <column name="id" type="bigint" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="name" type="varchar(255)"/>
+            <column name="created_at" type="timestamp" defaultValueComputed="CURRENT_TIMESTAMP"/>
+        </createTable>
+    </changeSet>
+
+</databaseChangeLog>
+```
+
+---
+
+## Business Integrations
+
+### Fatture in Cloud (Italian Invoicing)
+
+```yaml
+fattureincloud:
+  secret: ${FATTURE_IN_CLOUD_SECRET}
+```
+
+Automated invoice generation for Italian businesses:
+
+- Create invoices after successful payments
+- Customer management
+- Tax compliance (Italian VAT)
+- PDF invoice generation
+
+### TheLessonSpace (Virtual Classroom)
+
+```yaml
+thelessonspace:
+  base_url: https://api.thelessonspace.com/
+  organisation_id: 916
+  apikey: ${THELESSONSPACE_API_KEY}
+```
+
+**Features:**
+- Create virtual classrooms
+- Schedule lessons
+- Video conferencing
+- Interactive whiteboard
+- Screen sharing
+
+### Memoraiz (Learning Tool)
+
+```yaml
+memoraiz:
+  privatekey: ${MEMORAIZ_PRIVATE_KEY}
+```
+
+Integration for spaced repetition and memorization tools.
+
+---
+
+## Security Features
+
+### CORS Configuration
+
+**Development:**
+```yaml
+quarkus:
+  http:
+    cors:
+      methods: GET,PUT,POST,DELETE
+      origins: http://localhost:3000,http://localhost:3005
+```
+
+**Production:**
+```yaml
+quarkus:
+  http:
+    cors:
+      methods: GET,PUT,POST,DELETE
+      origins: ${CORS_ORIGINS}  # Comma-separated list
+```
+
+### OTP (One-Time Password)
+
+Secure OTP generation for email and phone verification:
+
+```yaml
+otp:
+  secret:
+    email: ${OTP_EMAIL_SECRET}
+    phone: ${OTP_PHONE_SECRET}
+```
+
+**Features:**
+- Time-based OTP (TOTP)
+- Separate secrets for email and phone
+- Configurable expiration
+
+### Google reCAPTCHA
+
+```yaml
+google:
+  recaptcha:
+    secret:
+      key: ${RECAPTCHA_SECRET_KEY}
+```
+
+Protection against bot registrations and spam.
+
+---
+
+## Monitoring & Observability
+
+### Logging
+
+Structured logging with Kotlin logging:
+
+```kotlin
+import mu.KotlinLogging
+
+private val logger = KotlinLogging.logger {}
+
+class UserService {
+    fun createUser(email: String) {
+        logger.info { "Creating user with email: $email" }
+        // ...
+        logger.debug { "User created successfully: $userId" }
+    }
+}
+```
+
+**Configuration:**
+
+```yaml
+quarkus:
+  log:
+    level: ${LOG_LEVEL:INFO}
+    console:
+      enable: true
+      json: true  # Production
+      format: "%d{HH:mm:ss} %-5p [%l{2.}] (%t) %s%e%n"
+```
+
+### Health Checks
+
+Each service exposes health check endpoints:
+
+```kotlin
+@Path("/health")
+class HealthCheckResource {
+    
+    @GET
+    fun health(): Response {
+        return Response.ok(mapOf("status" to "UP")).build()
+    }
+}
+```
+
+**Quarkus Built-in:**
+- `/q/health` - Overall health
+- `/q/health/live` - Liveness probe
+- `/q/health/ready` - Readiness probe
+
+### Metrics
+
+**Caffeine Cache Metrics:**
+```yaml
+quarkus:
+  cache:
+    caffeine:
+      "account-cache":
+        metrics-enabled: true
+```
+
+**Database Metrics:**
+```yaml
+quarkus:
+  datasource:
+    metrics:
+      enabled: true
+```
+
+---
+
+## Scheduled Jobs
+
+The Data Management service includes a job scheduler:
+
+```yaml
+scheduler:
+  enabled: ${SCHEDULER_ENABLED:true}
+```
+
+**Use Cases:**
+- Send lesson reminders
+- Process pending payments
+- Clean up expired sessions
+- Generate daily reports
+- Sync data with external services
+
+**Example:**
+
+```kotlin
+@ApplicationScoped
+class LessonReminderScheduler {
+    
+    @Scheduled(cron = "0 0 9 * * ?")  // Daily at 9 AM
+    fun sendDailyReminders() {
+        logger.info { "Sending daily lesson reminders" }
+        val lessons = lessonService.getTodayLessons()
+        lessons.forEach { lesson ->
+            notificationService.sendReminder(lesson)
+        }
+    }
+}
+```
+
+<Warning>
+  In production, ensure only one instance has the scheduler enabled to avoid duplicate job execution, or use distributed locking.
+</Warning>
+
+---
+
+## Development Tools
+
+### GraphQL UI
+
+Interactive GraphQL playground:
+
+- **Data Management**: http://localhost:8080/q/graphql-ui
+- **Chat**: http://localhost:9090/q/graphql-ui
+
+**Features:**
+- Schema exploration
+- Query/mutation testing
+- Subscription testing
+- Auto-completion
+- Documentation browser
+
+### Dev Services
+
+Quarkus Dev Services for testing:
+
+```yaml
+"%test":
+  quarkus:
+    datasource:
+      devservices:
+        enabled: true  # Auto-start PostgreSQL for tests
+```
+
+Automatically starts required services (PostgreSQL, etc.) for integration tests.
+
+### Hot Reload
+
+Live coding with automatic reload:
+
+```yaml
+"%dev":
+  quarkus:
+    live-reload:
+      instrumentation: true
+```
+
+Code changes are automatically detected and reloaded without restarting the application.
+
+---
+
+## Configuration Profiles
+
+### Development (`%dev`)
+
+- CORS enabled for localhost
+- Liquibase auto-migration
+- GraphQL UI enabled
+- Scheduler disabled (to avoid background jobs during development)
+- SuperTokens dev endpoint
+- Detailed logging
+
+### Testing (`%test`)
+
+- Dev Services enabled (auto-start databases)
+- MQTT disabled
+- Scheduler disabled
+- In-memory or test databases
+
+### Production (`%prod`)
+
+- Environment-based configuration
+- HTTP compression enabled
+- CORS from `CORS_ORIGINS`
+- JWT from local PEM file
+- Liquibase manual migration (set `migrate-at-start: false`)
+- JSON logging for log aggregation
+
+<Info>
+  Use environment variables extensively in production to keep secrets out of configuration files and enable environment-specific settings.
+</Info>

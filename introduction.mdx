@@ -1,0 +1,162 @@
+---
+title: Introduction
+description: Welcome to the Schoolr Backend documentation - A microservices-based educational platform backend
+---
+
+# Welcome to Schoolr Backend
+
+Schoolor Backend is a modern, scalable microservices architecture built to power educational platforms. Built with **Quarkus**, **Kotlin**, and a suite of cloud-native technologies, it provides robust APIs for managing educational content, real-time chat, and file operations.
+
+<CardGroup cols={3}>
+  <Card title="Data Management" icon="database" href="/services/datamanagement">
+    Core business logic, GraphQL API, and integrations with Stripe, WhatsApp, and more
+  </Card>
+  <Card title="Chat Service" icon="messages" href="/services/chat">
+    Real-time messaging with MQTT, GraphQL subscriptions, and message persistence
+  </Card>
+  <Card title="File Manager" icon="folder" href="/services/filemanager">
+    Secure file upload/download with MinIO object storage
+  </Card>
+</CardGroup>
+
+## Technology Stack
+
+Schoolor Backend leverages cutting-edge technologies for performance, scalability, and developer productivity:
+
+### Core Framework
+- **Quarkus 3.2.9** - Supersonic Subatomic Java framework optimized for Kubernetes
+- **Kotlin 1.9.21** - Modern, expressive JVM language with full Java interoperability
+- **Jakarta EE** - Enterprise-grade Java standards
+
+### Data & Persistence
+- **PostgreSQL** - Two separate databases for data isolation:
+  - `schoolr` - Main application database (datamanagement)
+  - `schoolr-chat` - Dedicated chat database
+- **Hibernate ORM** with Panache - Simplified persistence layer
+- **Liquibase** - Database schema migration and versioning
+
+### Messaging & Storage
+- **MQTT** (SmallRye Reactive Messaging) - Lightweight pub/sub messaging for real-time features
+- **MinIO** - S3-compatible object storage for file management
+
+### Security & Authentication
+- **SmallRye JWT** - JSON Web Token authentication
+- **SuperTokens** - Modern authentication with session management
+
+### APIs
+- **GraphQL** (SmallRye GraphQL) - Type-safe, flexible API layer with subscriptions support
+- **REST** - JAX-RS endpoints for specific operations
+
+<Note>
+  All three microservices run independently and communicate via MQTT for event-driven architecture patterns.
+</Note>
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Multi-tenant Support" icon="users">
+    Built-in support for multiple organizations and user roles
+  </Card>
+  <Card title="Real-time Chat" icon="comment">
+    Live messaging with MQTT-based pub/sub architecture
+  </Card>
+  <Card title="Payment Integration" icon="credit-card">
+    Stripe integration for subscription and payment processing
+  </Card>
+  <Card title="File Management" icon="file">
+    Secure file upload with 300MB limit and MinIO storage
+  </Card>
+  <Card title="Third-party Integrations" icon="plug">
+    WhatsApp, Novu notifications, SMS, and more
+  </Card>
+  <Card title="Cloud Native" icon="cloud">
+    Kubernetes-ready with Helm charts and container images
+  </Card>
+</CardGroup>
+
+## Architecture Overview
+
+The system is organized as a **Maven multi-module project**:
+
+```
+schoolor/
+├── apps/               # Microservices applications
+│   ├── schoolr-datamanagement (port 8080)
+│   ├── schoolr-chat (port 9090)
+│   └── schoolr-filemanager (port 9099)
+└── libs/               # Shared libraries
+    ├── schoolr-libs
+    ├── schoolr-config
+    └── schoolr-persistence-libs
+```
+
+<Info>
+  The shared libraries must be built and installed to the local Maven repository before running any application.
+</Info>
+
+## Quick Start
+
+### Prerequisites
+
+- **JDK 11** (or 17)
+- **Maven 3.8+**
+- **PostgreSQL** (two databases)
+- **MinIO** (for filemanager service)
+- **MQTT Broker** (e.g., Eclipse Mosquitto)
+
+### Build Shared Libraries
+
+Before running any service, build and install the shared libraries:
+
+```bash
+./mvnw clean install -pl libs/schoolr-libs,libs/schoolr-config,libs/schoolr-persistence-libs -am -DskipTests
+```
+
+### Run a Service
+
+Start any service in development mode:
+
+```bash
+# Data Management Service (port 8080)
+./mvnw quarkus:dev -pl apps/schoolr-datamanagement
+
+# Chat Service (port 9090)
+./mvnw quarkus:dev -pl apps/schoolr-chat
+
+# File Manager Service (port 9099)
+./mvnw quarkus:dev -pl apps/schoolr-filemanager
+```
+
+<Warning>
+  Make sure PostgreSQL, MinIO, and MQTT broker are running before starting the services.
+</Warning>
+
+## Development Profiles
+
+Quarkus supports multiple configuration profiles:
+
+- **`%dev`** - Development mode with hot reload, CORS for localhost, Liquibase migrations enabled
+- **`%test`** - Testing with devservices, in-memory databases, MQTT disabled
+- **`%prod`** - Production with environment-based configuration, compression enabled
+
+## GraphQL Playground
+
+Each service with GraphQL support exposes an interactive UI:
+
+- **Data Management**: http://localhost:8080/q/graphql-ui
+- **Chat**: http://localhost:9090/q/graphql-ui
+
+<Info>
+  The GraphQL UI is enabled in all profiles (`always-include: true`) for easy API exploration.
+</Info>
+
+## What's Next?
+
+<CardGroup cols={2}>
+  <Card title="Architecture Deep Dive" icon="sitemap" href="/architecture">
+    Learn about the three microservices and their interactions
+  </Card>
+  <Card title="Features Guide" icon="star" href="/features">
+    Explore key features and integrations in detail
+  </Card>
+</CardGroup>

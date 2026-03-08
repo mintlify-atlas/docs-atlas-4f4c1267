@@ -1,0 +1,528 @@
+---
+title: Running Services
+description: How to build and run Schoolr Backend services in development mode
+---
+
+This guide walks through building the shared libraries and running each Schoolr Backend service locally.
+
+## Prerequisites
+
+Before running the services, ensure you have:
+
+- ✅ Completed [Prerequisites](/getting-started/prerequisites)
+- ✅ Set up [Local Infrastructure](/getting-started/local-setup)
+- ✅ Configured [Environment Variables](/getting-started/configuration)
+
+## Clone Repository
+
+<Steps>
+  <Step title="Clone the Repository">
+    ```bash
+    git clone <repository-url> schoolr-back
+    cd schoolr-back
+    ```
+
+    <Info>
+      All commands should be run from the **root** of the project (`schoolr-back`) unless otherwise specified.
+    </Info>
+  </Step>
+
+  <Step title="Load Environment Variables">
+    Load your `.env` file:
+
+    ```bash
+    set -a && source .env && set +a
+    ```
+  </Step>
+</Steps>
+
+## Build Shared Libraries
+
+<Warning>
+  **This step is mandatory** before running any service. The applications depend on shared libraries that must be built first.
+</Warning>
+
+<Steps>
+  <Step title="Install Shared Libraries">
+    From the project root, build and install the required libraries:
+
+    ```bash
+    ./mvnw clean install -pl libs/schoolr-libs,libs/schoolr-config,libs/schoolr-persistence-libs -am -DskipTests
+    ```
+
+    This command:
+    - `clean` - Removes previous build artifacts
+    - `install` - Installs libraries to local Maven repository
+    - `-pl` - Specifies which modules to build
+    - `-am` - Also builds required dependencies
+    - `-DskipTests` - Skips running tests for faster build
+  </Step>
+
+  <Step title="Verify Build Success">
+    Look for output like:
+
+    ```
+    [INFO] BUILD SUCCESS
+    [INFO] Total time: XX.XXX s
+    ```
+
+    <Note>
+      Re-run this command only when you modify code in the `libs/` directory or after a complete `clean`.
+    </Note>
+  </Step>
+</Steps>
+
+## Running All Services Together
+
+The quickest way to start all services:
+
+```bash
+./run-dev.sh
+```
+
+This script starts **datamanagement**, **chat**, and **filemanager** in parallel:
+
+- 🟢 **schoolr-datamanagement** on port 8080
+- 🟢 **schoolr-chat** on port 9090  
+- 🟢 **schoolr-filemanager** on port 9099
+
+<Info>
+  Logs from all three services are mixed in the same terminal. Press **Ctrl+C** to stop all services.
+</Info>
+
+<Tip>
+  For separate logs per service or to run only specific services, use the individual service commands below.
+</Tip>
+
+## Running Individual Services
+
+### Datamanagement Service (Main API)
+
+The core business logic service with GraphQL API, integrations, and scheduling.
+
+<Steps>
+  <Step title="Navigate and Start">
+    From the project root:
+
+    <CodeGroup>
+    ```bash From Root Directory
+    cd apps/schoolr-datamanagement && ../../mvnw quarkus:dev
+    ```
+
+    ```bash Alternative (Maven -pl)
+    ./mvnw quarkus:dev -pl apps/schoolr-datamanagement
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Wait for Startup">
+    The service is ready when you see:
+
+    ```
+    Listening on: http://localhost:8080
+    ```
+
+    On first startup, Liquibase will apply database migrations automatically in dev mode.
+  </Step>
+
+  <Step title="Verify Service">
+    <Tabs>
+      <Tab title="Health Check">
+        ```bash
+        curl http://localhost:8080/q/health
+        ```
+
+        Expected response:
+        ```json
+        {
+          "status": "UP",
+          "checks": [...]
+        }
+        ```
+      </Tab>
+
+      <Tab title="GraphQL UI">
+        Open in browser: [http://localhost:8080/q/graphql-ui](http://localhost:8080/q/graphql-ui)
+
+        Try a test query:
+        ```graphql
+        query {
+          __schema {
+            queryType {
+              name
+            }
+          }
+        }
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+</Steps>
+
+**Service Details:**
+
+| Aspect | Value |
+|--------|-------|
+| **Port** | 8080 |
+| **Database** | `schoolr` |
+| **GraphQL Endpoint** | `/graphql` |
+| **GraphQL UI** | `/q/graphql-ui` |
+| **Health** | `/q/health` |
+| **Metrics** | `/q/metrics` |
+
+**Key Features:**
+- GraphQL API for business logic
+- Stripe payment integration
+- WhatsApp messaging
+- Novu notifications
+- Fatture in Cloud integration
+- TheLessonSpace integration
+- Memoraiz integration
+- Background job scheduler
+
+### Chat Service
+
+Real-time chat service with MQTT messaging.
+
+<Steps>
+  <Step title="Configure Chat Database">
+    If using a separate database container on port 5433:
+
+    ```bash
+    export POSTGRES_PORT=5433
+    export POSTGRES_DB=schoolr-chat
+    ```
+  </Step>
+
+  <Step title="Navigate and Start">
+    From the project root (in a **separate terminal**):
+
+    <CodeGroup>
+    ```bash From Root Directory
+    cd apps/schoolr-chat && ../../mvnw quarkus:dev
+    ```
+
+    ```bash Alternative (Maven -pl)
+    ./mvnw quarkus:dev -pl apps/schoolr-chat
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Wait for Startup">
+    The service is ready when you see:
+
+    ```
+    Listening on: http://localhost:9090
+    ```
+  </Step>
+
+  <Step title="Verify Service">
+    <Tabs>
+      <Tab title="Health Check">
+        ```bash
+        curl http://localhost:9090/q/health
+        ```
+      </Tab>
+
+      <Tab title="GraphQL UI">
+        Open: [http://localhost:9090/q/graphql-ui](http://localhost:9090/q/graphql-ui)
+      </Tab>
+    </Tabs>
+  </Step>
+</Steps>
+
+**Service Details:**
+
+| Aspect | Value |
+|--------|-------|
+| **Port** | 9090 |
+| **Database** | `schoolr-chat` |
+| **GraphQL Endpoint** | `/graphql` |
+| **GraphQL UI** | `/q/graphql-ui` |
+| **Health** | `/q/health` |
+
+**Key Features:**
+- Real-time chat messaging
+- MQTT integration for live updates
+- Message persistence
+- Chat topic management
+
+### File Manager Service
+
+File upload/download service with MinIO storage.
+
+<Warning>
+  This service requires MinIO to be running. See [Local Setup - MinIO](/getting-started/local-setup#minio-setup-file-manager-only).
+</Warning>
+
+<Steps>
+  <Step title="Verify MinIO is Running">
+    ```bash
+    docker ps | grep minio
+    # OR check the console
+    curl http://localhost:9000/minio/health/live
+    ```
+  </Step>
+
+  <Step title="Navigate and Start">
+    From the project root (in a **separate terminal**):
+
+    <CodeGroup>
+    ```bash From Root Directory
+    cd apps/schoolr-filemanager && ../../mvnw quarkus:dev
+    ```
+
+    ```bash Alternative (Maven -pl)
+    ./mvnw quarkus:dev -pl apps/schoolr-filemanager
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Wait for Startup">
+    The service is ready when you see:
+
+    ```
+    Listening on: http://localhost:9099
+    ```
+  </Step>
+
+  <Step title="Verify Service">
+    ```bash
+    curl http://localhost:9099/q/health
+    ```
+  </Step>
+</Steps>
+
+**Service Details:**
+
+| Aspect | Value |
+|--------|-------|
+| **Port** | 9099 |
+| **Storage** | MinIO (`schoolr` bucket) |
+| **Health** | `/q/health` |
+| **Max Upload Size** | 300 MB |
+
+**Key Features:**
+- File upload/download
+- MinIO object storage integration
+- MQTT notifications for file events
+- Media URL generation
+
+## Development Mode Features
+
+Quarkus dev mode provides several helpful features:
+
+<CardGroup cols={2}>
+  <Card title="Live Reload" icon="rotate">
+    Code changes are automatically detected and reloaded without restarting
+  </Card>
+  
+  <Card title="Dev UI" icon="browser">
+    Access at `/q/dev` for each service (e.g., http://localhost:8080/q/dev)
+  </Card>
+  
+  <Card title="Continuous Testing" icon="flask">
+    Press `r` in the terminal to run tests
+  </Card>
+  
+  <Card title="Debug Mode" icon="bug">
+    Debug port is automatically opened on 5005 (attach debugger)
+  </Card>
+</CardGroup>
+
+### Useful Dev Commands
+
+While a service is running in dev mode, you can press:
+
+| Key | Action |
+|-----|--------|
+| `r` | Run tests |
+| `d` | Open Dev UI in browser |
+| `h` | Show help |
+| `q` | Quit dev mode |
+| `s` | Show status |
+
+## Building Production JARs
+
+To build optimized JARs for production:
+
+<Steps>
+  <Step title="Build All Services">
+    ```bash
+    ./mvnw clean package -DskipTests
+    ```
+
+    This creates executable JARs in `apps/*/target/quarkus-app/`
+  </Step>
+
+  <Step title="Run Production JAR">
+    ```bash
+    # Example for datamanagement
+    java -jar apps/schoolr-datamanagement/target/quarkus-app/quarkus-run.jar
+    ```
+
+    <Warning>
+      Set all required environment variables for production before running!
+    </Warning>
+  </Step>
+</Steps>
+
+## Running Tests
+
+Run tests for a specific service:
+
+<CodeGroup>
+```bash Datamanagement
+./mvnw test -pl apps/schoolr-datamanagement
+```
+
+```bash Chat
+./mvnw test -pl apps/schoolr-chat
+```
+
+```bash File Manager
+./mvnw test -pl apps/schoolr-filemanager
+```
+
+```bash All Tests
+./mvnw test
+```
+</CodeGroup>
+
+<Info>
+  Tests use the `%test` profile with devservices, so no external PostgreSQL is needed for datamanagement tests.
+</Info>
+
+## Service Endpoints Reference
+
+### Datamanagement (8080)
+
+| Endpoint | Purpose |
+|----------|----------|
+| `http://localhost:8080/graphql` | GraphQL API |
+| `http://localhost:8080/q/graphql-ui` | GraphQL Playground |
+| `http://localhost:8080/q/health` | Health check |
+| `http://localhost:8080/q/metrics` | Prometheus metrics |
+| `http://localhost:8080/q/dev` | Dev UI |
+
+### Chat (9090)
+
+| Endpoint | Purpose |
+|----------|----------|
+| `http://localhost:9090/graphql` | GraphQL API |
+| `http://localhost:9090/q/graphql-ui` | GraphQL Playground |
+| `http://localhost:9090/q/health` | Health check |
+| `http://localhost:9090/q/dev` | Dev UI |
+
+### File Manager (9099)
+
+| Endpoint | Purpose |
+|----------|----------|
+| `http://localhost:9099/q/health` | Health check |
+| `http://localhost:9099/q/dev` | Dev UI |
+| `http://localhost:9099/media/*` | Media file access |
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Libraries not found error">
+    **Error:** `Could not find artifact it.simultech:schoolr-libs`
+
+    **Solution:** Build the shared libraries first:
+    ```bash
+    ./mvnw clean install -pl libs/schoolr-libs,libs/schoolr-config,libs/schoolr-persistence-libs -am -DskipTests
+    ```
+  </Accordion>
+
+  <Accordion title="Database connection failed">
+    **Error:** `Unable to acquire JDBC Connection`
+
+    **Solutions:**
+    - Verify PostgreSQL is running: `docker ps | grep postgres`
+    - Check database exists: `psql -U schoolr-user -l`
+    - Verify `.env` credentials match database
+    - For chat service, ensure `POSTGRES_PORT=5433` if using separate container
+  </Accordion>
+
+  <Accordion title="Port already in use">
+    **Error:** `Port 8080 already in use`
+
+    **Solutions:**
+    - Check what's using the port: `lsof -i :8080`
+    - Stop the conflicting process
+    - Override port: `export QUARKUS_HTTP_PORT=8081`
+  </Accordion>
+
+  <Accordion title="Liquibase migration failed">
+    **Error:** Liquibase change log error
+
+    **Solutions:**
+    - Verify database is empty or has compatible schema
+    - Check database permissions
+    - In dev mode, migrations run automatically; in prod they're disabled by default
+    - Clear database and restart to reapply migrations
+  </Accordion>
+
+  <Accordion title="MinIO connection failed (File Manager)">
+    **Error:** `Unable to connect to MinIO`
+
+    **Solutions:**
+    - Verify MinIO container is running: `docker ps | grep minio`
+    - Check MinIO console: http://localhost:9000
+    - Verify bucket `schoolr` exists
+    - Check credentials in `.env` match MinIO configuration
+  </Accordion>
+
+  <Accordion title="MQTT connection issues">
+    **Error:** MQTT broker connection failed
+
+    **Solutions:**
+    - Disable MQTT if not needed: `export MQTT_ENABLED=false`
+    - Verify broker is running: `docker ps | grep mqtt`
+    - Check broker accessibility: `telnet localhost 1883`
+    - Ensure firewall allows port 1883
+  </Accordion>
+
+  <Accordion title="Out of memory during build">
+    **Error:** `java.lang.OutOfMemoryError`
+
+    **Solution:** Increase Maven memory:
+    ```bash
+    export MAVEN_OPTS="-Xmx2g -XX:MaxPermSize=512m"
+    ./mvnw clean install
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Quick Reference Commands
+
+| Task | Command |
+|------|----------|
+| **Build libs** | `./mvnw clean install -pl libs/schoolr-libs,libs/schoolr-config,libs/schoolr-persistence-libs -am -DskipTests` |
+| **All services** | `./run-dev.sh` |
+| **Datamanagement** | `cd apps/schoolr-datamanagement && ../../mvnw quarkus:dev` |
+| **Chat** | `cd apps/schoolr-chat && ../../mvnw quarkus:dev` |
+| **File Manager** | `cd apps/schoolr-filemanager && ../../mvnw quarkus:dev` |
+| **Run tests** | `./mvnw test -pl apps/schoolr-datamanagement` |
+| **Build JARs** | `./mvnw package -DskipTests` |
+| **Clean all** | `./mvnw clean` |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="diagram-project" href="/architecture/overview">
+    Learn about the system architecture and design
+  </Card>
+  
+  <Card title="API Reference" icon="code" href="/api-reference/graphql">
+    Explore the GraphQL API documentation
+  </Card>
+  
+  <Card title="Database Schema" icon="database" href="/architecture/database">
+    Understand the database structure
+  </Card>
+  
+  <Card title="Integrations" icon="plug" href="/integrations/overview">
+    Learn about external service integrations
+  </Card>
+</CardGroup>

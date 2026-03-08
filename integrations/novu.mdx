@@ -1,0 +1,378 @@
+---
+title: "Novu Integration"
+description: "Multi-channel notification system with Novu"
+---
+
+# Novu Notifications
+
+Schoolr Backend integrates with [Novu](https://novu.co) for sending multi-channel notifications including email, SMS, and in-app notifications to students, tutors, and parents.
+
+## Configuration
+
+Novu requires two configuration parameters:
+
+<ParamField path="NOVU_API_KEY" type="string" required>
+  Your Novu API key from the Novu dashboard
+  
+  **Default (dev):** `ebc128b682e447c3daf8d27b17be458d`
+</ParamField>
+
+<ParamField path="NOVU_SERVER_URL" type="string" required>
+  Novu server URL (custom instance or cloud)
+  
+  **Default:** `https://api-notifications.develop.schoolr.net`
+</ParamField>
+
+From `application.yaml:133-135`:
+
+```yaml application.yaml
+novu:
+  apikey: ${NOVU_API_KEY:ebc128b682e447c3daf8d27b17be458d}
+  serverUrl: ${NOVU_SERVER_URL:https://api-notifications.develop.schoolr.net}
+```
+
+<Warning>
+  Keep your Novu API key secure. Never commit it to version control.
+</Warning>
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="Email Notifications" icon="envelope">
+    Lesson confirmations, payment receipts, and system alerts
+  </Card>
+  <Card title="SMS Notifications" icon="mobile">
+    Time-sensitive alerts and OTP codes
+  </Card>
+  <Card title="In-App Notifications" icon="bell">
+    Real-time notifications in the Schoolr web/mobile app
+  </Card>
+  <Card title="Template Management" icon="file-lines">
+    Centralized notification templates with variables
+  </Card>
+</CardGroup>
+
+## Notification Types
+
+Schoolr uses Novu for various notification workflows:
+
+### Lesson Notifications
+
+<AccordionGroup>
+  <Accordion title="Lesson Booked" icon="calendar-check">
+    Sent to student and tutor when a lesson is successfully booked.
+    
+    **Channels:** Email, In-App
+    
+    **Variables:**
+    - `studentName`: Student's full name
+    - `tutorName`: Tutor's full name
+    - `lessonDate`: Formatted lesson date
+    - `lessonTime`: Lesson start time
+    - `subject`: Lesson subject
+    - `lessonLink`: Link to join the lesson
+  </Accordion>
+  
+  <Accordion title="Lesson Confirmed" icon="check">
+    Sent when tutor accepts the lesson request.
+    
+    **Channels:** Email, SMS, In-App
+    
+    **Variables:**
+    - `studentName`: Student's full name
+    - `lessonDate`: Formatted lesson date
+    - `lessonTime`: Lesson start time
+    - `tutorName`: Tutor's full name
+  </Accordion>
+  
+  <Accordion title="Lesson Reminder" icon="clock">
+    Sent 24 hours and 1 hour before the lesson starts.
+    
+    **Channels:** Email, SMS
+    
+    **Variables:**
+    - `recipientName`: Student or tutor name
+    - `lessonDate`: Formatted lesson date
+    - `lessonTime`: Lesson start time
+    - `lessonLink`: Link to join the lesson
+  </Accordion>
+  
+  <Accordion title="Lesson Canceled" icon="xmark">
+    Sent when a lesson is canceled by student, tutor, or admin.
+    
+    **Channels:** Email, In-App
+    
+    **Variables:**
+    - `recipientName`: Recipient's name
+    - `lessonDate`: Canceled lesson date
+    - `canceledBy`: Who canceled (student/tutor/admin)
+    - `reason`: Cancellation reason (optional)
+  </Accordion>
+</AccordionGroup>
+
+### Payment Notifications
+
+- **Payment Successful:** Confirmation email with receipt
+- **Payment Failed:** Alert to update payment method
+- **Refund Processed:** Confirmation of refund with details
+- **Invoice Available:** Link to download invoice
+
+### Authentication Notifications
+
+- **Welcome Email:** Sent after successful signup
+- **Email Verification:** OTP code for email verification
+- **Phone Verification:** OTP code via SMS
+- **Password Reset:** Reset link and instructions
+- **Login Alert:** Notification of new login from unknown device
+
+## Sending Notifications
+
+Notifications are sent through the `NovuClient` in `~/workspace/source/apps/schoolr-datamanagement/src/main/java/it/simultech/dm/clients/novu/NovuClient.kt`:
+
+### Basic Usage
+
+```kotlin NotificationService.kt
+fun sendLessonConfirmation(
+    studentEmail: String,
+    studentName: String,
+    tutorName: String,
+    lessonDate: String,
+    lessonTime: String,
+    lessonLink: String
+) {
+    novuClient.trigger(
+        eventName = "lesson-confirmed",
+        subscriberId = studentEmail,
+        payload = mapOf(
+            "studentName" to studentName,
+            "tutorName" to tutorName,
+            "lessonDate" to lessonDate,
+            "lessonTime" to lessonTime,
+            "lessonLink" to lessonLink
+        )
+    )
+}
+```
+
+### Subscriber Management
+
+Register users as Novu subscribers:
+
+```kotlin NovuClient.kt
+fun createSubscriber(
+    subscriberId: String,
+    email: String,
+    firstName: String,
+    lastName: String,
+    phone: String? = null
+) {
+    httpClient.post("${serverUrl}/subscribers") {
+        header("Authorization", "ApiKey $apiKey")
+        contentType(ContentType.Application.Json)
+        body = mapOf(
+            "subscriberId" to subscriberId,
+            "email" to email,
+            "firstName" to firstName,
+            "lastName" to lastName,
+            "phone" to phone
+        )
+    }
+}
+```
+
+### Update Subscriber Preferences
+
+Allow users to control which notifications they receive:
+
+```kotlin
+fun updatePreferences(
+    subscriberId: String,
+    templateId: String,
+    channel: String, // "email", "sms", "in_app"
+    enabled: Boolean
+) {
+    httpClient.patch("${serverUrl}/subscribers/${subscriberId}/preferences/${templateId}") {
+        header("Authorization", "ApiKey $apiKey")
+        body = mapOf(
+            "channel" to mapOf("type" to channel, "enabled" to enabled)
+        )
+    }
+}
+```
+
+## Webhook Integration
+
+Novu can send webhooks for notification delivery status:
+
+```kotlin NovuWebhookResource.kt
+@POST
+@Path("/webhook")
+fun handleWebhook(payload: NovuWebhookPayload): Response {
+    when (payload.event) {
+        "notification.sent" -> {
+            logger.info { "Notification ${payload.notificationId} sent to ${payload.subscriberId}" }
+        }
+        "notification.delivered" -> {
+            logger.info { "Notification ${payload.notificationId} delivered" }
+        }
+        "notification.failed" -> {
+            logger.error { "Notification ${payload.notificationId} failed: ${payload.error}" }
+        }
+    }
+    return Response.ok().build()
+}
+```
+
+From `NovuWebhookResource.kt:23-45`
+
+## Notification Templates
+
+Templates are managed in the Novu dashboard. Each template includes:
+
+1. **Template Name:** Unique identifier (e.g., `lesson-confirmed`)
+2. **Channels:** Which channels to use (email, SMS, in-app)
+3. **Content:** HTML for email, text for SMS, structured data for in-app
+4. **Variables:** Placeholders like `{{studentName}}`
+
+### Example Email Template
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { font-family: Arial, sans-serif; }
+    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+    .button { background: #4F46E5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Lesson Confirmed!</h1>
+    <p>Hi {{studentName}},</p>
+    <p>Your lesson with <strong>{{tutorName}}</strong> has been confirmed for <strong>{{lessonDate}}</strong> at <strong>{{lessonTime}}</strong>.</p>
+    <p><a href="{{lessonLink}}" class="button">Join Lesson</a></p>
+    <p>Thanks,<br>The Schoolr Team</p>
+  </div>
+</body>
+</html>
+```
+
+## Testing
+
+### Local Development
+
+For testing, use Novu's test mode or set up a local Novu instance:
+
+```bash docker-compose
+services:
+  novu-api:
+    image: ghcr.io/novuhq/novu/api:latest
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      REDIS_HOST: redis
+      MONGO_URL: mongodb://mongo:27017/novu
+    depends_on:
+      - redis
+      - mongo
+  
+  redis:
+    image: redis:alpine
+  
+  mongo:
+    image: mongo:5
+```
+
+Then update your `.env`:
+
+```bash .env
+NOVU_SERVER_URL=http://localhost:3000
+NOVU_API_KEY=your-local-api-key
+```
+
+### Test Notification Trigger
+
+Create a test endpoint to trigger notifications:
+
+```kotlin TestResource.kt
+@GET
+@Path("/test-notification")
+fun testNotification(): Response {
+    novuClient.trigger(
+        eventName = "lesson-confirmed",
+        subscriberId = "test@example.com",
+        payload = mapOf(
+            "studentName" to "Test Student",
+            "tutorName" to "Test Tutor",
+            "lessonDate" to "March 15, 2024",
+            "lessonTime" to "10:00 AM",
+            "lessonLink" to "https://schoolr.net/lesson/123"
+        )
+    )
+    return Response.ok("Notification sent").build()
+}
+```
+
+## Best Practices
+
+<Check>Use consistent template naming (e.g., `entity-action` format)</Check>
+<Check>Test templates with all variable combinations before production</Check>
+<Check>Set up proper subscriber preferences to comply with privacy regulations</Check>
+<Check>Monitor delivery rates and adjust retry logic</Check>
+<Check>Use digest notifications for frequent updates (e.g., multiple messages)</Check>
+
+<Warning>
+  Always respect user notification preferences. Provide easy opt-out mechanisms for non-critical notifications.
+</Warning>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Notifications not sending">
+    **Cause:** Invalid API key, incorrect subscriber ID, or template not found
+    
+    **Solution:**
+    - Verify `NOVU_API_KEY` is correct
+    - Check that the subscriber exists in Novu
+    - Ensure the template name matches exactly (case-sensitive)
+    - Check Novu activity logs in the dashboard
+  </Accordion>
+  
+  <Accordion title="Variables not rendering in email">
+    **Cause:** Incorrect variable names or missing data
+    
+    **Solution:**
+    - Verify variable names match template (e.g., `{{studentName}}`)
+    - Ensure all required variables are passed in the payload
+    - Check template preview in Novu dashboard
+  </Accordion>
+  
+  <Accordion title="Emails going to spam">
+    **Cause:** Poor email reputation or missing authentication
+    
+    **Solution:**
+    - Set up SPF, DKIM, and DMARC records for your domain
+    - Use a verified sender email address
+    - Avoid spam trigger words in subject/content
+    - Monitor email deliverability in Novu analytics
+  </Accordion>
+</AccordionGroup>
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="WhatsApp Integration" icon="whatsapp" href="/integrations/whatsapp">
+    Alternative notification channel via WhatsApp
+  </Card>
+  <Card title="MQTT Messaging" icon="message" href="/integrations/mqtt">
+    Real-time in-app notifications
+  </Card>
+  <Card title="Account Verification" icon="envelope-circle-check" href="/api/accounts/mutations">
+    Email and phone verification flows
+  </Card>
+  <Card title="Lesson Booking" icon="calendar" href="/api/lessons/overview">
+    Events that trigger notifications
+  </Card>
+</CardGroup>

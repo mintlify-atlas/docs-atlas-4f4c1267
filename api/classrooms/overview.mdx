@@ -1,0 +1,93 @@
+---
+title: 'Classrooms API Overview'
+description: 'Manage classrooms, students, tutors, and lessons in the Schoolr platform'
+---
+
+## Introduction
+
+The Classrooms API provides GraphQL endpoints for managing classroom entities, including queries for retrieving classroom information and mutations for classroom operations. All classroom operations are exposed through the `ClassroomResource` GraphQL API.
+
+## Base Information
+
+- **API Type**: GraphQL
+- **Resource Location**: `it.simultech.dm.resources.ClassroomResource`
+- **Authentication**: Required for most endpoints
+- **Authorization**: Some endpoints require admin access via `@AdminAccess`
+
+## Key Concepts
+
+### Classroom Types
+
+Classrooms in Schoolr can be of different types:
+
+- **MULTIPLE**: Group classrooms with multiple students
+- **SINGLE**: One-on-one classrooms
+
+### Lesson Status
+
+Lessons within classrooms can have the following statuses:
+
+- **PENDING**: Lesson is scheduled and awaiting confirmation
+- **CONFIRMED**: Lesson has been confirmed by all parties
+- **DONE**: Lesson has been completed
+
+### Payment Status
+
+Packets and payments associated with classrooms can have:
+
+- **PENDING**: Payment initiated but not completed
+- **DONE**: Payment successfully completed
+- **EXPIRED**: Payment window has expired
+- **CANCELED**: Payment was canceled
+
+## Classroom Structure
+
+A classroom entity contains:
+
+- **Students**: List of students enrolled in the classroom
+- **Tutor**: The assigned tutor for the classroom
+- **Level**: Education level of the classroom
+- **Subject**: Subject being taught
+- **Signature**: Unique identifier for the classroom
+- **Home Lesson**: Boolean indicating if lessons are conducted at home (affects pricing)
+- **Visibility**: Controls if classroom is visible on the cluster
+
+## Common Operations
+
+### Retrieving Classrooms
+
+You can retrieve classrooms by:
+- Classroom ID
+- Signature (unique identifier)
+- Student ID (all classrooms for a student)
+- Tutor ID (all classrooms for a tutor)
+
+### Pagination
+
+Most list queries support pagination with the `PaginationParams` type:
+
+```kotlin
+PaginationParams(
+  page: Int = 0,
+  size: Int = 10
+)
+```
+
+### Search
+
+Some queries support text search to filter results.
+
+## Code Reference
+
+Source: `apps/schoolr-datamanagement/src/main/java/it/simultech/dm/resources/ClassroomResource.kt`
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Classroom Queries" icon="magnifying-glass" href="/api/classrooms/queries">
+    Learn about all available classroom queries
+  </Card>
+  <Card title="Classroom Mutations" icon="pen-to-square" href="/api/classrooms/mutations">
+    Explore classroom modification operations
+  </Card>
+</CardGroup>

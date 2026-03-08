@@ -1,0 +1,192 @@
+---
+title: 'Classroom Mutations'
+description: 'GraphQL mutations for creating and modifying classrooms'
+---
+
+## Overview
+
+Classroom mutations allow you to create new classrooms and manage classroom lifecycle operations such as archiving. All mutations are transactional and require proper authentication.
+
+## Create Classroom
+
+### createClassroom
+
+Create a new classroom with specified configuration. This is an admin-only operation.
+
+<ParamField body="data" type="CreateClassroomDto" required>
+  Classroom creation data containing:
+  - Student information
+  - Tutor assignment
+  - Level and subject
+  - Classroom type
+  - Additional configuration
+</ParamField>
+
+<ResponseField name="classroom" type="Classroom">
+  The newly created classroom entity
+</ResponseField>
+
+```kotlin
+// ClassroomResource.kt:244
+@Mutation
+@Authenticated
+@AdminAccess
+fun createClassroom(data: CreateClassroomDto) = 
+    classroomService.createClassroom(data)
+```
+
+<Note>
+  This mutation requires admin access via the `@AdminAccess` annotation. Regular users cannot create classrooms directly.
+</Note>
+
+### CreateClassroomDto Structure
+
+The `CreateClassroomDto` contains all necessary information to set up a new classroom:
+
+- **Students**: List of student IDs to enroll
+- **Tutor**: Tutor ID assignment
+- **Level**: Education level (e.g., elementary, middle school, high school)
+- **Subject**: Subject being taught
+- **Type**: SINGLE or MULTIPLE classroom type
+- **Configuration**: Additional settings like home lessons, visibility, etc.
+
+## Archive Operations
+
+### archiveClassroom
+
+Archive a classroom, making it inactive while preserving all data.
+
+<ParamField body="classroomUuid" type="UUID" required>
+  The unique identifier of the classroom to archive
+</ParamField>
+
+<ResponseField name="success" type="Boolean">
+  Returns true if the classroom was successfully archived
+</ResponseField>
+
+```kotlin
+// ClassroomResource.kt:106
+@Mutation
+@Transactional
+fun archiveClassroom(classroomUuid: UUID) = identityUtil.authAccount {
+    classroomService.archiveClassroom(
+        classroomUuid = classroomUuid, 
+        accountId = it.id, 
+        archived = true
+    )
+}
+```
+
+<Warning>
+  Archiving a classroom affects its visibility and may impact ongoing lessons and payments. Ensure all pending transactions are handled before archiving.
+</Warning>
+
+### cancelArchiveClassroom
+
+Restore an archived classroom to active status.
+
+<ParamField body="classroomUuid" type="UUID" required>
+  The unique identifier of the classroom to restore
+</ParamField>
+
+<ResponseField name="success" type="Boolean">
+  Returns true if the classroom was successfully restored
+</ResponseField>
+
+```kotlin
+// ClassroomResource.kt:114
+@Mutation
+@Transactional
+fun cancelArchiveClassroom(classroomUuid: UUID): Boolean {
+    return classroomService.cancelArchiveClassroom(classroomUuid = classroomUuid)
+}
+```
+
+## Usage Examples
+
+### Creating a Classroom (GraphQL)
+
+```graphql
+mutation CreateClassroom($data: CreateClassroomDto!) {
+  createClassroom(data: $data) {
+    id
+    signature
+    level
+    subject
+    classroomType
+    students {
+      id
+      full_name
+    }
+    tutor {
+      id
+      full_name
+    }
+  }
+}
+```
+
+### Archiving a Classroom (GraphQL)
+
+```graphql
+mutation ArchiveClassroom($uuid: UUID!) {
+  archiveClassroom(classroomUuid: $uuid)
+}
+```
+
+### Restoring a Classroom (GraphQL)
+
+```graphql
+mutation RestoreClassroom($uuid: UUID!) {
+  cancelArchiveClassroom(classroomUuid: $uuid)
+}
+```
+
+## Authorization
+
+### Admin Access Required
+
+The following mutations require admin privileges:
+- `createClassroom`
+
+### User Authentication Required
+
+The following mutations require user authentication:
+- `archiveClassroom` - Only the classroom owner (account holder) can archive
+- `cancelArchiveClassroom` - Restoration permissions may vary
+
+## Transaction Handling
+
+Both archive mutations are decorated with `@Transactional`, ensuring that:
+- All database operations complete successfully or roll back entirely
+- Data consistency is maintained across related entities
+- No partial updates occur in case of errors
+
+## Error Handling
+
+Common errors you may encounter:
+
+<AccordionGroup>
+  <Accordion title="Classroom not found">
+    The specified UUID does not match any existing classroom. Verify the UUID is correct and the classroom exists.
+  </Accordion>
+  
+  <Accordion title="Unauthorized access">
+    The authenticated user does not have permission to perform this operation. Check admin access for `createClassroom` or ownership for archive operations.
+  </Accordion>
+  
+  <Accordion title="Invalid classroom state">
+    The classroom may be in a state that prevents the operation (e.g., trying to archive an already archived classroom).
+  </Accordion>
+</AccordionGroup>
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Classroom Queries" icon="magnifying-glass" href="/api/classrooms/queries">
+    Query classroom data
+  </Card>
+  <Card title="Payments API" icon="credit-card" href="/api/payments/overview">
+    Manage classroom payments
+  </Card>
+</CardGroup>

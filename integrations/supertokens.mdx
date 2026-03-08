@@ -1,0 +1,408 @@
+---
+title: "SuperTokens Integration"
+description: "Authentication and user management with SuperTokens"
+---
+
+# SuperTokens Authentication
+
+Schoolr Backend uses [SuperTokens](https://supertokens.com) for authentication, providing email/password and passwordless (OTP) authentication flows with built-in session management and JWT tokens.
+
+## Configuration
+
+SuperTokens requires three configuration parameters:
+
+<ParamField path="AUTH_CONNECTION_URI" type="string" required>
+  SuperTokens core instance URI
+  
+  **Default (dev):** `https://st-dev-4404b6a0-ff20-11ee-bab3-156e1ba2e437.aws.supertokens.io`
+</ParamField>
+
+<ParamField path="SUPERTOKEN_CDI_VERSION" type="string" required>
+  SuperTokens Core Driver Interface version
+  
+  **Default:** `2.20`
+</ParamField>
+
+<ParamField path="AUTH_API_KEY" type="string" required>
+  API key for authenticating with SuperTokens core
+  
+  **Default (dev):** `KA4oPRv0uMyNAtV=bPCOEUKnRq`
+</ParamField>
+
+From `application.yaml:153-156`:
+
+```yaml application.yaml
+supertoken:
+  uri: ${AUTH_CONNECTION_URI:https://st-dev-4404b6a0-ff20-11ee-bab3-156e1ba2e437.aws.supertokens.io}
+  cdi-version: ${SUPERTOKEN_CDI_VERSION:2.20}
+  api-key: ${AUTH_API_KEY:KA4oPRv0uMyNAtV=bPCOEUKnRq}
+```
+
+## JWT Configuration
+
+SuperTokens provides JWT tokens via JWKS endpoint:
+
+```yaml application.yaml
+mp:
+  jwt:
+    verify:
+      publickey:
+        location: https://supertokens.kube.simultech.it/.well-known/jwks.json
+```
+
+Quarkus automatically validates JWT tokens using MicroProfile JWT.
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="Email/Password Auth" icon="envelope">
+    Traditional signup and login with email verification
+  </Card>
+  <Card title="Passwordless Auth" icon="mobile">
+    Email and SMS OTP-based authentication
+  </Card>
+  <Card title="Session Management" icon="clock">
+    Automatic session refresh and revocation
+  </Card>
+  <Card title="User Metadata" icon="database">
+    Store custom user data in SuperTokens
+  </Card>
+</CardGroup>
+
+## Authentication Recipes
+
+Schoolr uses two SuperTokens recipes:
+
+### 1. Email/Password Authentication
+
+Traditional authentication with signup and login:
+
+<Steps>
+  <Step title="User Signup">
+    Create a new user with email and password:
+    
+    ```kotlin AuthService.kt
+    fun signUp(email: String, password: String): SignUpResponse {
+        val response = httpClient.post<SignUpResponse>(
+            "${supertokenUri}/recipe/signup"
+        ) {
+            header("api-key", apiKey)
+            header("cdi-version", cdiVersion)
+            contentType(ContentType.Application.Json)
+            body = mapOf(
+                "email" to email,
+                "password" to password
+            )
+        }
+        return response
+    }
+    ```
+  </Step>
+  
+  <Step title="Email Verification">
+    Send verification email and verify code:
+    
+    ```kotlin
+    // Send verification email
+    fun sendVerificationEmail(userId: String) {
+        httpClient.post("${supertokenUri}/user/email/verify/token") {
+            header("api-key", apiKey)
+            body = mapOf("userId" to userId)
+        }
+    }
+    
+    // Verify email with code
+    fun verifyEmail(token: String): Boolean {
+        val response = httpClient.post("${supertokenUri}/user/email/verify") {
+            header("api-key", apiKey)
+            body = mapOf("token" to token)
+        }
+        return response.status == "OK"
+    }
+    ```
+  </Step>
+  
+  <Step title="User Login">
+    Authenticate user and get session tokens:
+    
+    ```kotlin
+    fun signIn(email: String, password: String): SignInResponse {
+        val response = httpClient.post<SignInResponse>(
+            "${supertokenUri}/recipe/signin"
+        ) {
+            header("api-key", apiKey)
+            header("cdi-version", cdiVersion)
+            body = mapOf(
+                "email" to email,
+                "password" to password
+            )
+        }
+        return response
+    }
+    ```
+  </Step>
+</Steps>
+
+### 2. Passwordless Authentication
+
+OTP-based authentication via email or SMS:
+
+<Tabs>
+  <Tab title="Email OTP">
+    ```kotlin AuthService.kt
+    // Send OTP to email
+    fun sendEmailOTP(email: String): CreateCodeResponse {
+        return httpClient.post("${supertokenUri}/recipe/signinup/code") {
+            header("api-key", apiKey)
+            body = mapOf(
+                "email" to email
+            )
+        }
+    }
+    
+    // Verify email OTP
+    fun verifyEmailOTP(deviceId: String, code: String): ConsumeCodeResponse {
+        return httpClient.post("${supertokenUri}/recipe/signinup/code/consume") {
+            header("api-key", apiKey)
+            body = mapOf(
+                "deviceId" to deviceId,
+                "userInputCode" to code
+            )
+        }
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Phone OTP">
+    ```kotlin AuthService.kt
+    // Send OTP to phone
+    fun sendPhoneOTP(phoneNumber: String): CreateCodeResponse {
+        return httpClient.post("${supertokenUri}/recipe/signinup/code") {
+            header("api-key", apiKey)
+            body = mapOf(
+                "phoneNumber" to phoneNumber
+            )
+        }
+    }
+    
+    // Verify phone OTP
+    fun verifyPhoneOTP(deviceId: String, code: String): ConsumeCodeResponse {
+        return httpClient.post("${supertokenUri}/recipe/signinup/code/consume") {
+            header("api-key", apiKey)
+            body = mapOf(
+                "deviceId" to deviceId,
+                "userInputCode" to code
+            )
+        }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## User Management
+
+### Get User by ID
+
+```kotlin AuthService.kt
+fun getUser(userId: String): SuperTokenUser? {
+    val response = httpClient.get("${supertokenUri}/user/id") {
+        header("api-key", apiKey)
+        parameter("userId", userId)
+    }
+    return response.user
+}
+```
+
+### Update User Metadata
+
+Store custom data in SuperTokens:
+
+```kotlin
+fun updateUserMetadata(userId: String, metadata: Map<String, Any>) {
+    httpClient.put("${supertokenUri}/recipe/user/metadata") {
+        header("api-key", apiKey)
+        body = mapOf(
+            "userId" to userId,
+            "metadataUpdate" to metadata
+        )
+    }
+}
+```
+
+**Example metadata:**
+
+```json
+{
+  "accountUUID": "550e8400-e29b-41d4-a716-446655440000",
+  "role": "student",
+  "emailVerified": true,
+  "phoneVerified": true
+}
+```
+
+### Delete User
+
+```kotlin
+fun deleteUser(userId: String) {
+    httpClient.post("${supertokenUri}/user/remove") {
+        header("api-key", apiKey)
+        body = mapOf("userId" to userId)
+    }
+}
+```
+
+## Password Reset Flow
+
+<Steps>
+  <Step title="Generate Reset Token">
+    ```kotlin
+    fun generatePasswordResetToken(userId: String): String {
+        val response = httpClient.post("${supertokenUri}/user/password/reset/token") {
+            header("api-key", apiKey)
+            body = mapOf("userId" to userId)
+        }
+        return response.token
+    }
+    ```
+  </Step>
+  
+  <Step title="Send Reset Email">
+    Send the reset token to the user's email (via Novu or email service)
+  </Step>
+  
+  <Step title="Reset Password">
+    ```kotlin
+    fun resetPassword(token: String, newPassword: String): Boolean {
+        val response = httpClient.post("${supertokenUri}/user/password/reset") {
+            header("api-key", apiKey)
+            body = mapOf(
+                "token" to token,
+                "newPassword" to newPassword
+            )
+        }
+        return response.status == "OK"
+    }
+    ```
+  </Step>
+</Steps>
+
+## Session Management
+
+SuperTokens handles session creation and validation automatically. Access the current user in GraphQL resolvers:
+
+```kotlin AccountResource.kt
+@Query
+fun me(): AccountExtended {
+    return identityUtil.authAccount { identity ->
+        accountService.getAccount(identity.uuid)
+            ?: throw Exception("Account not found")
+    }.toExtended()
+}
+```
+
+The `identityUtil.authAccount` method extracts the JWT from the request and validates it.
+
+## Testing SuperTokens
+
+### Local Development
+
+For local development, you can use SuperTokens' hosted dev instance or run SuperTokens Core locally:
+
+<CodeGroup>
+
+```bash Docker
+docker run -d \
+  -p 3567:3567 \
+  -e POSTGRESQL_USER=supertokens_user \
+  -e POSTGRESQL_PASSWORD=somePassword \
+  -e POSTGRESQL_DATABASE_NAME=supertokens \
+  -e POSTGRESQL_HOST=host.docker.internal \
+  -e POSTGRESQL_PORT=5432 \
+  registry.supertokens.io/supertokens/supertokens-postgresql
+```
+
+```yaml docker-compose
+services:
+  supertokens:
+    image: registry.supertokens.io/supertokens/supertokens-postgresql
+    ports:
+      - "3567:3567"
+    environment:
+      POSTGRESQL_USER: supertokens_user
+      POSTGRESQL_PASSWORD: somePassword
+      POSTGRESQL_DATABASE_NAME: supertokens
+      POSTGRESQL_HOST: postgres
+      POSTGRESQL_PORT: 5432
+    depends_on:
+      - postgres
+```
+
+</CodeGroup>
+
+Then update your `.env`:
+
+```bash .env
+AUTH_CONNECTION_URI=http://localhost:3567
+AUTH_API_KEY=your-api-key
+```
+
+## Best Practices
+
+<Check>Use email verification for all new signups</Check>
+<Check>Implement rate limiting on authentication endpoints</Check>
+<Check>Store minimal data in SuperTokens metadata (use your DB for most user data)</Check>
+<Check>Rotate API keys regularly in production</Check>
+<Check>Use separate SuperTokens instances for dev, staging, and production</Check>
+
+<Warning>
+  Never expose SuperTokens API keys in client-side code. All SuperTokens API calls should be made from the backend.
+</Warning>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="JWT validation fails">
+    **Cause:** Incorrect JWKS endpoint or expired token
+    
+    **Solution:**
+    - Verify `mp.jwt.verify.publickey.location` points to the correct JWKS endpoint
+    - Check that the token hasn't expired (tokens expire after the configured session lifetime)
+    - Ensure the SuperTokens instance is accessible from your backend
+  </Accordion>
+  
+  <Accordion title="User creation fails">
+    **Cause:** Email already exists or invalid password
+    
+    **Solution:**
+    - Check if the email is already registered
+    - Ensure password meets minimum requirements (length, complexity)
+    - Verify API key has the correct permissions
+  </Accordion>
+  
+  <Accordion title="OTP not received">
+    **Cause:** Email/SMS delivery failure or incorrect configuration
+    
+    **Solution:**
+    - Check SuperTokens dashboard for delivery logs
+    - Verify email service (Novu) is configured correctly
+    - Check spam folder for email OTPs
+    - Verify phone number format for SMS OTPs
+  </Accordion>
+</AccordionGroup>
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="Authentication API" icon="key" href="/api/authentication/overview">
+    Complete authentication API reference
+  </Card>
+  <Card title="JWT Tokens" icon="lock" href="/api/authentication/jwt">
+    JWT structure and validation
+  </Card>
+  <Card title="Account Management" icon="user" href="/api/accounts/overview">
+    User account operations
+  </Card>
+  <Card title="Novu Integration" icon="bell" href="/integrations/novu">
+    Notification delivery for auth emails
+  </Card>
+</CardGroup>

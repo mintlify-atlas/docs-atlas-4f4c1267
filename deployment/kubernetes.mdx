@@ -1,0 +1,582 @@
+---
+title: 'Kubernetes Deployment'
+description: 'Deploy Schoolr Backend to Kubernetes using Helm charts'
+---
+
+## Introduction
+
+Schoolor Backend provides production-ready Helm charts for deploying all three microservices to Kubernetes. Each service includes comprehensive configuration for deployments, services, init jobs, auto-scaling, and ingress routing.
+
+## Helm Chart Structure
+
+Each service has its own Helm chart located at:
+
+```
+apps/
+├── schoolr-datamanagement/kubernetes/helm-charts/
+├── schoolr-chat/kubernetes/helm-charts/
+└── schoolr-filemanager/kubernetes/helm-charts/
+```
+
+Chart components:
+
+- `Chart.yaml` - Chart metadata and version
+- `values.yaml` - Default configuration values
+- `templates/` - Kubernetes resource templates
+  - `deployment.yaml` - Main application deployment
+  - `service.yaml` - ClusterIP service
+  - `configmap.yaml` - Environment configuration
+  - `secret.yaml` - Sensitive data
+  - `init-job.yaml` - Liquibase migration job (datamanagement/chat only)
+  - `pod-autoscaler.yaml` - HPA configuration
+  - `http-route.yaml` - Ingress routing
+  - `healtcheck-policy.yaml` - Health check policy
+
+## Prerequisites
+
+<Steps>
+  <Step title="Build Container Images">
+    Build and push container images to your registry:
+    
+    ```bash
+    # Set image tag (e.g., commit SHA, version, or branch name)
+    export IMAGE_TAG="v1.0.0"
+    
+    # Build and push all services
+    for app in schoolr-datamanagement schoolr-chat schoolr-filemanager; do
+      ./mvnw package -Dquarkus.container-image.build=true \
+        -Dquarkus.container-image.push=true \
+        -DIMAGE_TAG=$IMAGE_TAG \
+        -DREGISTRY_USERNAME=$REGISTRY_USER \
+        -DREGISTRY_PASSWORD=$REGISTRY_PASS \
+        -pl apps/$app -am -DskipTests
+    done
+    ```
+  </Step>
+  
+  <Step title="Create Kubernetes Namespace">
+    ```bash
+    kubectl create namespace schoolr-prod
+    ```
+  </Step>
+  
+  <Step title="Configure Registry Secret">
+    Create a secret for pulling images from your private registry:
+    
+    ```bash
+    kubectl create secret docker-registry regcred \
+      --docker-server=gitlab.simultech.it:4567 \
+      --docker-username=$REGISTRY_USER \
+      --docker-password=$REGISTRY_PASS \
+      --namespace=schoolr-prod
+    ```
+  </Step>
+</Steps>
+
+## Deploying with Helm
+
+### Deploy schoolr-datamanagement
+
+<Steps>
+  <Step title="Navigate to Chart Directory">
+    ```bash
+    cd apps/schoolr-datamanagement/kubernetes/helm-charts
+    ```
+  </Step>
+  
+  <Step title="Create Custom Values File">
+    Create `values-prod.yaml` with your production configuration:
+    
+    ```yaml
+    image:
+      tag: 'v1.0.0'
+    
+    baseName: schoolr-datamanagement
+    containerPort: 8080
+    
+    service:
+      type: ClusterIP
+      port: 80
+    
+    resources:
+      requests:
+        cpu: 1000m
+        memory: 1Gi
+      limits:
+        cpu: 2000m
+        memory: 2Gi
+    
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 10
+      targetCPUUtilizationPercentage: 70
+    
+    config:
+      ENV: "production"
+      POSTGRES_HOST: "postgres.schoolr.svc.cluster.local"
+      POSTGRES_DB: "schoolr"
+      POSTGRES_USER: "schoolr-user"
+      POSTGRES_PASSWORD: "your-secure-password"
+      POSTGRES_SCHEMA: "public"
+      MQTT_HOST: "mqtt.schoolr.svc.cluster.local"
+      MQTT_PORT: "1883"
+      TZ: "UTC"
+      LOG_LEVEL: "INFO"
+      
+      # Authentication
+      AUTH_CONNECTION_URI: "https://supertokens.example.com"
+      AUTH_API_KEY: "your-supertokens-api-key"
+      SUPERTOKEN_CDI_VERSION: "2.20"
+      JWT_KEY_PATH: "keys/publickey-prod.pem"
+      
+      # CORS
+      CORS_ORIGINS: "https://app.schoolr.net,https://api.schoolr.net"
+      
+      # Application URLs
+      SCHOOLR_BASE_URL: "https://app.schoolr.net"
+      SCHOOLR_BASE_API: "https://api.schoolr.net"
+      SCHOOLR_DOCUMENT_URL: "https://files.schoolr.net/media"
+      
+      # External Services
+      STRIPE_SECRET_KEY: "sk_live_..."
+      STRIPE_ENDPOINT_SECRET: "whsec_..."
+      NOVU_API_KEY: "your-novu-key"
+      NOVU_SERVER_URL: "https://api.novu.co"
+      WHATSAPP_API_KEY: "your-whatsapp-key"
+      WHATSAPP_APPLICATION_ID: "your-app-id"
+      FATTURE_IN_CLOUD_SECRET: "your-secret"
+      RECAPTCHA_SECRET_KEY: "your-recaptcha-key"
+      
+      # SMS Service
+      SMS_URL: "https://sms.provider.com"
+      SMS_USERNAME: "your-username"
+      SMS_PASSWORD: "your-password"
+      
+      # Scheduler
+      SCHEDULER_ENABLED: "true"
+      MQTT_ENABLED: "true"
+    
+    healthRequestPath: "/q/health/ready"
+    ```
+  </Step>
+  
+  <Step title="Install or Upgrade with Helm">
+    ```bash
+    # Install new deployment
+    helm install schoolr-datamanagement . \
+      -f values-prod.yaml \
+      --namespace schoolr-prod
+    
+    # Or upgrade existing deployment
+    helm upgrade schoolr-datamanagement . \
+      -f values-prod.yaml \
+      --namespace schoolr-prod
+    ```
+  </Step>
+</Steps>
+
+### Deploy schoolr-chat
+
+<Steps>
+  <Step title="Navigate to Chart Directory">
+    ```bash
+    cd apps/schoolr-chat/kubernetes/helm-charts
+    ```
+  </Step>
+  
+  <Step title="Create Values File">
+    Create `values-prod.yaml`:
+    
+    ```yaml
+    image:
+      tag: 'v1.0.0'
+    
+    baseName: schoolr-chat
+    containerPort: 9090
+    
+    resources:
+      requests:
+        cpu: 500m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+    
+    config:
+      POSTGRES_HOST: "postgres.schoolr.svc.cluster.local"
+      POSTGRES_DB: "schoolr-chat"
+      POSTGRES_USER: "schoolr-user"
+      POSTGRES_PASSWORD: "your-secure-password"
+      MQTT_HOST: "mqtt.schoolr.svc.cluster.local"
+      MQTT_ENABLED: "true"
+      AUTH_CONNECTION_URI: "https://supertokens.example.com"
+      AUTH_API_KEY: "your-supertokens-api-key"
+      CORS_ORIGINS: "https://app.schoolr.net"
+      LOG_LEVEL: "INFO"
+    ```
+  </Step>
+  
+  <Step title="Deploy with Helm">
+    ```bash
+    helm install schoolr-chat . \
+      -f values-prod.yaml \
+      --namespace schoolr-prod
+    ```
+  </Step>
+</Steps>
+
+### Deploy schoolr-filemanager
+
+<Steps>
+  <Step title="Navigate to Chart Directory">
+    ```bash
+    cd apps/schoolr-filemanager/kubernetes/helm-charts
+    ```
+  </Step>
+  
+  <Step title="Create Values File">
+    Create `values-prod.yaml`:
+    
+    ```yaml
+    image:
+      tag: 'v1.0.0'
+    
+    baseName: schoolr-filemanager
+    containerPort: 9099
+    
+    resources:
+      requests:
+        cpu: 500m
+        memory: 512Mi
+    
+    config:
+      MINIO_HOST: "http://minio.schoolr.svc.cluster.local"
+      MINIO_PORT: "9000"
+      MINIO_USERNAME: "your-minio-user"
+      MINIO_PASSWORD: "your-minio-password"
+      MINIO_BUCKET: "schoolr"
+      MQTT_HOST: "mqtt.schoolr.svc.cluster.local"
+      MQTT_ENABLED: "true"
+      AUTH_CONNECTION_URI: "https://supertokens.example.com"
+      AUTH_API_KEY: "your-supertokens-api-key"
+      CORS_ORIGINS: "https://app.schoolr.net"
+      LOG_LEVEL: "INFO"
+    ```
+  </Step>
+  
+  <Step title="Deploy with Helm">
+    ```bash
+    helm install schoolr-filemanager . \
+      -f values-prod.yaml \
+      --namespace schoolr-prod
+    ```
+  </Step>
+</Steps>
+
+## Understanding Init Jobs
+
+For `schoolr-datamanagement` and `schoolr-chat`, the Helm charts include **init jobs** that run Liquibase migrations before the main application starts.
+
+### Init Job Configuration
+
+The init job is defined in `templates/init-job.yaml`:
+
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: '{{ .Values.baseName }}-liquibase-init-{{ .Chart.AppVersion }}'
+spec:
+  template:
+    spec:
+      containers:
+        - env:
+            - name: QUARKUS_LIQUIBASE_ENABLED
+              value: "true"
+            - name: QUARKUS_INIT_AND_EXIT
+              value: "true"
+            - name: QUARKUS_LIQUIBASE_MIGRATE_AT_START
+              value: "true"
+            - name: SCHEDULER_ENABLED
+              value: "false"
+            - name: MQTT_ENABLED
+              value: "false"
+          image: '{{ .Values.image.repository }}:{{ .Chart.AppVersion }}'
+          envFrom:
+            - configMapRef:
+                name: '{{ .Values.baseName }}-configmap'
+            - secretRef:
+                name: '{{ .Values.baseName }}-secret'
+      restartPolicy: OnFailure
+```
+
+Key features:
+- Runs the same container image as the main app
+- Enables Liquibase and sets `init-and-exit` to true
+- Disables scheduler and MQTT to avoid side effects
+- Automatically retries on failure
+- Main deployment waits for job completion via init container
+
+### Init Container Wait
+
+The main deployment includes an init container that waits for the migration job:
+
+```yaml
+initContainers:
+  - args:
+      - job
+      - '{{ .Values.baseName }}-liquibase-init-{{ .Chart.AppVersion }}'
+    image: groundnuty/k8s-wait-for:no-root-v1.7
+    name: init
+```
+
+This ensures database schema is ready before the application starts.
+
+## Health Probes
+
+Each deployment includes three types of health probes:
+
+### Liveness Probe
+
+Checks if the application is alive and should be restarted if failing:
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /q/health/live
+    port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 10
+  failureThreshold: 3
+```
+
+### Readiness Probe
+
+Determines if the pod is ready to receive traffic:
+
+```yaml
+readinessProbe:
+  httpGet:
+    path: /q/health/ready
+    port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 10
+  failureThreshold: 3
+```
+
+### Startup Probe
+
+Provides extra time for slow-starting applications:
+
+```yaml
+startupProbe:
+  httpGet:
+    path: /q/health/started
+    port: 8080
+  periodSeconds: 10
+  failureThreshold: 30
+  timeoutSeconds: 10
+```
+
+<Note>
+Quarkus provides these health check endpoints via the `quarkus-smallrye-health` extension.
+</Note>
+
+## Auto-scaling
+
+Enable Horizontal Pod Autoscaler to automatically scale based on CPU usage:
+
+```yaml
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+```
+
+This configuration:
+- Maintains at least 2 replicas for high availability
+- Scales up to 10 replicas under load
+- Targets 70% CPU utilization
+
+## Ingress Configuration
+
+The Helm charts include `HTTPRoute` resources for ingress. Example:
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: HTTPRoute
+metadata:
+  name: schoolr-datamanagement-route
+spec:
+  parentRefs:
+    - name: gateway
+  hostnames:
+    - api.schoolr.net
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: schoolr-datamanagement-service
+          port: 80
+```
+
+<Warning>
+Ensure your Kubernetes cluster has a compatible Gateway API implementation or use traditional Ingress resources.
+</Warning>
+
+## Verifying Deployment
+
+<Steps>
+  <Step title="Check Pod Status">
+    ```bash
+    kubectl get pods -n schoolr-prod
+    ```
+    
+    Expected output:
+    ```
+    NAME                                      READY   STATUS    RESTARTS   AGE
+    schoolr-datamanagement-xxxxxxxxxx-xxxxx   1/1     Running   0          2m
+    schoolr-chat-xxxxxxxxxx-xxxxx             1/1     Running   0          2m
+    schoolr-filemanager-xxxxxxxxxx-xxxxx      1/1     Running   0          2m
+    ```
+  </Step>
+  
+  <Step title="View Init Job Status">
+    ```bash
+    kubectl get jobs -n schoolr-prod
+    ```
+    
+    Jobs should show `COMPLETIONS: 1/1`
+  </Step>
+  
+  <Step title="Check Application Logs">
+    ```bash
+    kubectl logs -f deployment/schoolr-datamanagement-deployment -n schoolr-prod
+    ```
+  </Step>
+  
+  <Step title="Test Health Endpoints">
+    Port-forward and test health endpoints:
+    
+    ```bash
+    kubectl port-forward svc/schoolr-datamanagement-service 8080:80 -n schoolr-prod
+    curl http://localhost:8080/q/health/live
+    curl http://localhost:8080/q/health/ready
+    ```
+  </Step>
+</Steps>
+
+## Updating Deployments
+
+### Rolling Updates
+
+Update to a new image version:
+
+```bash
+# Update image tag in values file or override
+helm upgrade schoolr-datamanagement . \
+  --set image.tag=v1.1.0 \
+  -f values-prod.yaml \
+  --namespace schoolr-prod
+```
+
+Helm will perform a rolling update with zero downtime.
+
+### Database Migrations on Update
+
+When deploying a new version with schema changes:
+
+1. The init job runs automatically with the new image version
+2. Liquibase applies new changesets
+3. Main deployment waits for job completion
+4. Application starts with updated schema
+
+<Tip>
+Liquibase tracks applied changesets in the `DATABASECHANGELOG` table, ensuring migrations run only once.
+</Tip>
+
+## Rollback
+
+Rollback to a previous release:
+
+```bash
+# View release history
+helm history schoolr-datamanagement -n schoolr-prod
+
+# Rollback to previous release
+helm rollback schoolr-datamanagement -n schoolr-prod
+
+# Rollback to specific revision
+helm rollback schoolr-datamanagement 3 -n schoolr-prod
+```
+
+<Warning>
+Rolling back the application does not revert database migrations. See [Database Migrations](/deployment/database-migrations) for rollback strategies.
+</Warning>
+
+## Troubleshooting
+
+### Pod Not Starting
+
+Check events and logs:
+
+```bash
+kubectl describe pod <pod-name> -n schoolr-prod
+kubectl logs <pod-name> -n schoolr-prod
+```
+
+Common issues:
+- Image pull errors (check registry credentials)
+- Init job not completing (check migration logs)
+- Resource limits too low
+- Missing environment variables
+
+### Init Job Failing
+
+Check migration job logs:
+
+```bash
+kubectl logs job/schoolr-datamanagement-liquibase-init-v1.0.0 -n schoolr-prod
+```
+
+Common causes:
+- Database connection issues
+- Invalid Liquibase changelog
+- Insufficient database permissions
+
+### Health Check Failures
+
+Test health endpoints directly:
+
+```bash
+kubectl exec -it <pod-name> -n schoolr-prod -- curl localhost:8080/q/health/ready
+```
+
+## Best Practices
+
+<Check>Use separate namespaces for different environments (dev, staging, prod)</Check>
+<Check>Pin image tags to specific versions (avoid `latest`)</Check>
+<Check>Store sensitive values in Kubernetes Secrets, not ConfigMaps</Check>
+<Check>Configure resource requests and limits appropriately</Check>
+<Check>Enable auto-scaling for production workloads</Check>
+<Check>Monitor pod restarts and OOMKills</Check>
+<Check>Use PodDisruptionBudgets for high availability</Check>
+<Check>Implement backup strategies for databases</Check>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Database Migrations" icon="database" href="/deployment/database-migrations">
+    Learn how to manage Liquibase migrations
+  </Card>
+  
+  <Card title="Monitoring" icon="chart-line" href="/deployment/monitoring">
+    Set up logging and monitoring
+  </Card>
+</CardGroup>

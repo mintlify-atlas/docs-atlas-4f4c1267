@@ -1,0 +1,520 @@
+---
+title: Environment Variables
+description: Complete reference of all environment variables for Schoolr Backend services
+---
+
+Schoolr Backend services are configured via environment variables and YAML configuration files. This page documents all available environment variables across the three services.
+
+## Overview
+
+Environment variables follow this pattern:
+- **Development**: Most variables have sensible defaults in `application.yaml`
+- **Production**: All sensitive variables must be set via environment
+- **Format**: `${VARIABLE_NAME:default_value}`
+
+<Warning>
+**Never commit sensitive values** like API keys, passwords, or secrets to the repository. Use environment variables or a `.env` file (which is in `.gitignore`).
+</Warning>
+
+## Common Variables
+
+These variables are used across multiple services.
+
+### Quarkus Configuration
+
+<ParamField path="QUARKUS_INIT_AND_EXIT" type="boolean" default="false">
+  If `true`, Quarkus initializes then exits immediately (useful for schema generation or validation).
+</ParamField>
+
+<ParamField path="LOG_LEVEL" type="string" default="INFO">
+  Application log level. Options: `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`.
+</ParamField>
+
+<ParamField path="CORS_ORIGINS" type="string" required>
+  **Production only**. Comma-separated list of allowed CORS origins.
+  
+  Example: `https://app.schoolr.net,https://schoolr.net`
+</ParamField>
+
+### Database Configuration
+
+<ParamField path="POSTGRES_HOST" type="string" default="localhost">
+  PostgreSQL server hostname or IP address.
+</ParamField>
+
+<ParamField path="POSTGRES_PORT" type="string" default="5432">
+  PostgreSQL server port.
+</ParamField>
+
+<ParamField path="POSTGRES_DB" type="string" default="schoolr">
+  Database name. Different for each service:
+  - `schoolr` for datamanagement
+  - `schoolr-chat` for chat service
+</ParamField>
+
+<ParamField path="POSTGRES_USER" type="string" default="schoolr-user">
+  PostgreSQL username.
+</ParamField>
+
+<ParamField path="POSTGRES_PASSWORD" type="string" default="password">
+  PostgreSQL password. **Must be changed in production**.
+</ParamField>
+
+<ParamField path="POSTGRES_SCHEMA" type="string" default="public">
+  Database schema name.
+</ParamField>
+
+### Authentication (SuperTokens)
+
+<ParamField path="AUTH_CONNECTION_URI" type="string" required>
+  SuperTokens server URI.
+  
+  - Dev default (datamanagement): `https://st-dev-4404b6a0-ff20-11ee-bab3-156e1ba2e437.aws.supertokens.io`
+  - Dev default (chat/filemanager): `https://dev-f91a26a1b07b11ed9f2325619c0fe0b1-eu-west-1.aws.supertokens.io:3569`
+</ParamField>
+
+<ParamField path="AUTH_API_KEY" type="string" required>
+  SuperTokens API key for backend-to-SuperTokens communication.
+  
+  - Dev default (datamanagement): `KA4oPRv0uMyNAtV=bPCOEUKnRq`
+  - Dev default (chat/filemanager): `R8mXfPElJ5S3rUyBqy5a5a=fri7oiy`
+</ParamField>
+
+<ParamField path="SUPERTOKEN_CDI_VERSION" type="string" default="2.20">
+  SuperTokens Core Driver Interface version.
+</ParamField>
+
+### JWT Configuration
+
+<ParamField path="JWT_KEY_PATH" type="string" default="keys/publickey-prod.pem">
+  **Production only**. Path to JWT public key PEM file for token verification.
+  
+  In development, JWKS is fetched from SuperTokens automatically.
+</ParamField>
+
+### MQTT Configuration
+
+<ParamField path="MQTT_HOST" type="string" default="34.154.145.9">
+  MQTT broker hostname or IP address.
+</ParamField>
+
+<ParamField path="MQTT_PORT" type="string" default="1883">
+  MQTT broker port.
+</ParamField>
+
+<ParamField path="MQTT_ENABLED" type="boolean" default="true">
+  Enable or disable MQTT messaging. Set to `false` to disable inter-service messaging.
+</ParamField>
+
+### Container Registry
+
+Used for building and pushing Docker images:
+
+<ParamField path="IMAGE_TAG" type="string" default="tag">
+  Docker image tag/version.
+  
+  Example: `1.0.0`, `develop`, `feature-xyz`
+</ParamField>
+
+<ParamField path="REGISTRY_USERNAME" type="string" default="username">
+  GitLab container registry username.
+</ParamField>
+
+<ParamField path="REGISTRY_PASSWORD" type="string" default="password">
+  GitLab container registry password or access token.
+</ParamField>
+
+## schoolr-datamanagement Variables
+
+The main API service has the most environment variables due to its many integrations.
+
+### Application URLs
+
+<ParamField path="SCHOOLR_BASE_URL" type="string" default="https://app.schoolr.net">
+  **Production**: Base URL of the frontend application.
+  
+  **Dev**: `http://localhost:3000`
+</ParamField>
+
+<ParamField path="SCHOOLR_BASE_API" type="string" default="https://api.schoolr.net">
+  **Production**: Base URL of the API service.
+  
+  **Dev**: `http://localhost:8080`
+</ParamField>
+
+<ParamField path="SCHOOLR_DOCUMENT_URL" type="string" default="https://files.schoolr.net/media">
+  URL for serving uploaded files/media.
+  
+  Points to the filemanager service.
+</ParamField>
+
+### Scheduler
+
+<ParamField path="SCHEDULER_ENABLED" type="boolean" default="true">
+  Enable or disable scheduled tasks (cron jobs).
+  
+  Set to `false` in development to prevent scheduled tasks from running.
+</ParamField>
+
+### Stripe Payment Integration
+
+<ParamField path="STRIPE_SECRET_KEY" type="string" required>
+  Stripe secret API key.
+  
+  - Dev default: `sk_test_51NNBJnFS7BVEQn9n...` (test key)
+  - **Production**: Use your live secret key
+</ParamField>
+
+<ParamField path="STRIPE_ENDPOINT_SECRET" type="string" required>
+  Stripe webhook endpoint secret for verifying webhook signatures.
+  
+  - Dev default: `whsec_oWEvCx6gQhAGgXGqFb7tjwaSGy4Ek2WP`
+  - **Production**: Use your live webhook secret
+</ParamField>
+
+### Google reCAPTCHA
+
+<ParamField path="RECAPTCHA_SECRET_KEY" type="string" required>
+  Google reCAPTCHA secret key for validating captcha responses.
+  
+  Dev default: `6LfN2p8lAAAAAG4-7uL6n8zIZLHO3WLqdJvvZ5M2`
+</ParamField>
+
+### Novu Notifications
+
+<ParamField path="NOVU_API_KEY" type="string" required>
+  Novu API key for sending notifications.
+  
+  Dev default: `ebc128b682e447c3daf8d27b17be458d`
+</ParamField>
+
+<ParamField path="NOVU_SERVER_URL" type="string" default="https://api-notifications.develop.schoolr.net">
+  Novu server URL.
+</ParamField>
+
+### WhatsApp Business API
+
+<ParamField path="WHATSAPP_API_KEY" type="string" required>
+  Facebook/Meta access token for WhatsApp Business API.
+  
+  Dev default: `EAAT9OPxVlpEBANzLSdaOOl36vEj9ZB41...`
+</ParamField>
+
+<ParamField path="WHATSAPP_APPLICATION_ID" type="string" required>
+  WhatsApp Business Account ID.
+  
+  Dev default: `109925188728921`
+</ParamField>
+
+<ParamField path="WHATSAPP_ENDPOINT_SECRET" type="string" required>
+  Webhook verification secret for WhatsApp webhooks.
+  
+  Dev default: `o7k4Yzri3ASYb97vrjJopIonm8fs4cHe`
+</ParamField>
+
+### Fatture in Cloud (Italian Invoicing)
+
+<ParamField path="FATTURE_IN_CLOUD_SECRET" type="string" required>
+  Fatture in Cloud JWT token for API authentication.
+  
+  Dev default: `a/eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...`
+</ParamField>
+
+### SMS Gateway
+
+<ParamField path="SMS_URL" type="string" default="https://148.251.153.140:8002">
+  SMS gateway API endpoint.
+</ParamField>
+
+<ParamField path="SMS_USERNAME" type="string" default="username">
+  SMS gateway username.
+</ParamField>
+
+<ParamField path="SMS_PASSWORD" type="string" default="password">
+  SMS gateway password.
+</ParamField>
+
+### Memoraiz Integration
+
+<ParamField path="MEMORAIZ_PRIVATE_KEY" type="string" required>
+  Memoraiz private key for ECDSA signing.
+  
+  Dev default: `MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0w...`
+</ParamField>
+
+### Hardcoded Configuration
+
+These are currently hardcoded in `application.yaml` but may need to be environment variables:
+
+- **TheLessonSpace**:
+  - `base_url`: `https://api.thelessonspace.com/`
+  - `organisation_id`: `916`
+  - `apikey`: `97f03253-3179-4309-b037-cdf7512aa968`
+
+- **OTP Secrets** (used for email/phone verification):
+  - `otp.secret.email`: `Prk4V4@pZye.]$&&}6{ujOFy'YZB32`
+  - `otp.secret.phone`: `Prk6rP@pZye.]$P&}0{ujKperdcswB32`
+
+- **Schoolr Secret**:
+  - `schoolr.secret`: `5xDJdAcHlHMJ3iZ2pB6rZIx8WJ6E6YF1`
+  - `schoolr.trustpilotEmail`: `www.schoolr.net+87f4224828@invite.trustpilot.com`
+
+<Warning>
+These hardcoded values should be moved to environment variables before production deployment.
+</Warning>
+
+## schoolr-chat Variables
+
+The chat service has minimal configuration, mostly inheriting common variables.
+
+### GraphQL UI
+
+<ParamField path="ENABLE_GRAPHQL_UI" type="boolean" default="true">
+  Enable or disable the GraphQL UI at `/q/graphql-ui`.
+  
+  Set to `false` in production for security.
+</ParamField>
+
+### Database
+
+Uses the same database variables as above, but with different defaults:
+
+- `POSTGRES_DB` defaults to `schoolr-chat`
+
+## schoolr-filemanager Variables
+
+The filemanager service connects to MinIO for object storage.
+
+### MinIO Configuration
+
+<ParamField path="MINIO_HOST" type="string" default="http://127.0.0.1">
+  MinIO server URL (including protocol).
+  
+  Example: `http://minio.local`, `https://s3.amazonaws.com`
+</ParamField>
+
+<ParamField path="MINIO_PORT" type="string" default="9000">
+  MinIO server port.
+</ParamField>
+
+<ParamField path="MINIO_USERNAME" type="string" default="orVLknzhRB">
+  MinIO access key / username.
+</ParamField>
+
+<ParamField path="MINIO_PASSWORD" type="string" default="YB9Kql8woUv8KpwG2DIxWI6nJ0Q21qfm1IJSBzlG">
+  MinIO secret key / password. **Must be changed in production**.
+</ParamField>
+
+<ParamField path="MINIO_BUCKET" type="string" default="schoolr">
+  MinIO bucket name for storing files.
+  
+  The bucket must exist before starting the service.
+</ParamField>
+
+## Using Environment Variables
+
+### .env File (Development)
+
+Create a `.env` file in the project root (it's in `.gitignore`):
+
+```bash
+# Database
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_USER=schoolr-user
+POSTGRES_PASSWORD=your-password
+
+# Auth
+AUTH_CONNECTION_URI=https://your-supertokens.io
+AUTH_API_KEY=your-api-key
+
+# Stripe
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_ENDPOINT_SECRET=whsec_...
+
+# MinIO (for filemanager)
+MINIO_HOST=http://localhost
+MINIO_PORT=9000
+MINIO_USERNAME=minioadmin
+MINIO_PASSWORD=minioadmin
+MINIO_BUCKET=schoolr
+
+# MQTT
+MQTT_HOST=localhost
+MQTT_PORT=1883
+MQTT_ENABLED=true
+```
+
+### Loading .env in Quarkus
+
+Quarkus doesn't load `.env` by default. To use it:
+
+**Option 1**: Export variables before running:
+
+```bash
+set -a && source .env && set +a
+./mvnw quarkus:dev -pl apps/schoolr-datamanagement
+```
+
+**Option 2**: Use a startup script:
+
+```bash
+#!/bin/bash
+# run-dev.sh
+export $(cat .env | xargs)
+./mvnw quarkus:dev -pl apps/schoolr-datamanagement
+```
+
+**Option 3**: IDE configuration (IntelliJ IDEA):
+- Run → Edit Configurations
+- Add "Environment variables" from `.env` file
+- Or use the EnvFile plugin
+
+### Docker / Kubernetes
+
+For containerized deployments:
+
+**Docker Compose**:
+
+```yaml
+services:
+  datamanagement:
+    image: schoolr-datamanagement:latest
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+    env_file:
+      - .env.prod
+```
+
+**Kubernetes**:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: schoolr-config
+data:
+  POSTGRES_HOST: "postgres-service"
+  MQTT_HOST: "mqtt-broker"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: schoolr-secrets
+type: Opaque
+stringData:
+  POSTGRES_PASSWORD: "secure-password"
+  STRIPE_SECRET_KEY: "sk_live_..."
+```
+
+## Environment Variable Checklist
+
+### Minimum Required for Development
+
+<Check>**PostgreSQL**: Connection details (or use defaults with local PostgreSQL)</Check>
+<Check>**MQTT**: Host and port (or disable with `MQTT_ENABLED=false`)</Check>
+<Check>**MinIO** (filemanager only): Connection details</Check>
+
+### Required for Production
+
+<Check>**CORS_ORIGINS**: Allowed frontend URLs</Check>
+<Check>**POSTGRES_PASSWORD**: Secure database password</Check>
+<Check>**AUTH_CONNECTION_URI**: Production SuperTokens instance</Check>
+<Check>**AUTH_API_KEY**: Production SuperTokens API key</Check>
+<Check>**JWT_KEY_PATH**: Path to production JWT public key</Check>
+<Check>**STRIPE_SECRET_KEY**: Live Stripe secret key</Check>
+<Check>**STRIPE_ENDPOINT_SECRET**: Live webhook secret</Check>
+<Check>**SCHOOLR_BASE_URL**: Production frontend URL</Check>
+<Check>**SCHOOLR_BASE_API**: Production API URL</Check>
+<Check>**MINIO_PASSWORD**: Secure MinIO password</Check>
+<Check>**All integration API keys**: WhatsApp, Novu, Fatture in Cloud, etc.</Check>
+
+## Troubleshooting
+
+<Accordion title="Service starts but can't connect to database">
+Check your database environment variables:
+
+```bash
+echo $POSTGRES_HOST
+echo $POSTGRES_PORT
+echo $POSTGRES_DB
+echo $POSTGRES_USER
+# Don't echo password in production!
+```
+
+Verify PostgreSQL is running:
+```bash
+psql -h $POSTGRES_HOST -p $POSTGRES_PORT -U $POSTGRES_USER -d $POSTGRES_DB
+```
+</Accordion>
+
+<Accordion title="CORS errors in browser">
+Check `CORS_ORIGINS` in production:
+
+```bash
+echo $CORS_ORIGINS
+```
+
+Ensure it includes your frontend URL (without trailing slash):
+```bash
+export CORS_ORIGINS=https://app.schoolr.net,https://schoolr.net
+```
+</Accordion>
+
+<Accordion title="JWT verification fails">
+**Development**: Ensure SuperTokens dev instance is accessible
+
+**Production**: Verify `JWT_KEY_PATH` points to the correct PEM file:
+
+```bash
+ls -la $JWT_KEY_PATH
+cat $JWT_KEY_PATH  # Should show PEM-formatted public key
+```
+</Accordion>
+
+<Accordion title="File uploads fail (filemanager)">
+Check MinIO configuration:
+
+```bash
+echo $MINIO_HOST
+echo $MINIO_PORT
+echo $MINIO_BUCKET
+
+# Test MinIO connection
+mc alias set myminio $MINIO_HOST $MINIO_USERNAME $MINIO_PASSWORD
+mc ls myminio/$MINIO_BUCKET
+```
+
+Ensure the bucket exists:
+```bash
+mc mb myminio/$MINIO_BUCKET
+```
+</Accordion>
+
+<Accordion title="Environment variables not loading">
+Verify variables are exported:
+
+```bash
+env | grep POSTGRES
+env | grep STRIPE
+env | grep MINIO
+```
+
+If using `.env`, ensure you source it:
+```bash
+set -a && source .env && set +a
+```
+</Accordion>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Building" icon="hammer" href="/development/building">
+    Build the project with Maven
+  </Card>
+  <Card title="Testing" icon="flask" href="/development/testing">
+    Run tests with different configurations
+  </Card>
+</CardGroup>

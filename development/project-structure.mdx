@@ -1,0 +1,266 @@
+---
+title: Project Structure
+description: Understanding the Schoolr Backend Maven multi-module architecture
+---
+
+Schoolr Backend follows a Maven multi-module architecture that separates reusable libraries from deployable applications.
+
+## Root Structure
+
+The project is organized into two main directories:
+
+```
+schoolr/
+├── apps/           # Deployable Quarkus applications
+├── libs/           # Shared libraries
+├── pom.xml         # Root POM
+├── mvnw            # Maven wrapper
+└── local-ci/       # Local CI scripts
+```
+
+## Maven Modules
+
+The root `pom.xml` defines two parent modules:
+
+```xml
+<modules>
+    <module>apps</module>
+    <module>libs</module>
+</modules>
+```
+
+### Technology Stack
+
+- **Build System**: Maven 3.8+
+- **Runtime**: Quarkus 3.2.9.Final (Jakarta EE)
+- **Languages**: Kotlin 1.9.21, Java 11/18
+- **Packaging**: Jib container images
+
+## Apps Directory
+
+The `apps/` directory contains three independently deployable Quarkus microservices:
+
+### schoolr-datamanagement
+
+**Port**: 8080 (default)
+
+**Purpose**: Main API service with GraphQL interface
+
+**Responsibilities**:
+- Core business logic
+- User management and authentication
+- Payment processing (Stripe integration)
+- Notifications (Novu)
+- External integrations:
+  - WhatsApp Business API
+  - Fatture in Cloud (invoicing)
+  - TheLessonSpace (virtual classroom)
+  - Memoraiz (learning management)
+  - SMS gateway
+- Scheduled tasks and cron jobs
+
+**Database**: PostgreSQL (`schoolr` database)
+
+**Key Features**:
+- GraphQL API (SmallRye GraphQL)
+- JWT authentication (SuperTokens)
+- Liquibase migrations
+- MQTT messaging for cross-service communication
+
+### schoolr-chat
+
+**Port**: 9090
+
+**Purpose**: Real-time chat service
+
+**Responsibilities**:
+- Chat message handling
+- GraphQL API for chat operations
+- Real-time message delivery via MQTT
+- File upload notifications
+- Lesson request notifications
+
+**Database**: PostgreSQL (`schoolr-chat` database)
+
+**Key Features**:
+- Separate database for chat isolation
+- MQTT message broker integration
+- GraphQL UI (configurable)
+
+### schoolr-filemanager
+
+**Port**: 9099
+
+**Purpose**: File storage and retrieval service
+
+**Responsibilities**:
+- File upload/download
+- MinIO object storage integration
+- File notification via MQTT
+- Media serving
+
+**Storage**: MinIO (S3-compatible object storage)
+
+**Key Features**:
+- Large file support (up to 300MB)
+- JWT-protected endpoints
+- MQTT notifications on file events
+
+## Libs Directory
+
+The `libs/` directory contains three shared library modules that provide common functionality to all applications:
+
+### schoolr-libs
+
+**Version**: 2.2-SNAPSHOT
+
+**Purpose**: Core utilities and shared business logic
+
+**Contents**:
+- WhatsApp client implementation
+- Data Transfer Objects (DTOs)
+- Logging utilities
+- Common Kotlin extensions
+- HTTP client utilities (Retrofit/OkHttp)
+
+**Dependencies**:
+- Hibernate ORM Panache
+- Kotlin Coroutines
+- OTP generation
+- Retrofit 2.9.0 for HTTP clients
+- Jackson Kotlin module
+
+### schoolr-config
+
+**Version**: 1.1-SNAPSHOT
+
+**Purpose**: Shared configuration classes and constants
+
+**Contents**:
+- Application-wide configuration
+- Environment-specific settings
+- Configuration data classes
+
+**Dependencies**:
+- Minimal (Kotlin stdlib only)
+- Lightweight for fast compilation
+
+### schoolr-persistence-libs
+
+**Version**: 1.0-SNAPSHOT
+
+**Purpose**: Database access utilities and persistence helpers
+
+**Contents**:
+- Predicate builders for dynamic queries
+- Repository patterns
+- Database access helpers
+- Panache extensions
+
+**Dependencies**:
+- Hibernate ORM Panache
+- Kotlin stdlib
+
+## Module Dependencies
+
+All applications (`apps/*`) depend on the shared libraries:
+
+```
+schoolr-datamanagement
+  ├── schoolr-libs (2.2-SNAPSHOT)
+  ├── schoolr-config (1.1-SNAPSHOT)
+  └── schoolr-persistence-libs (1.0-SNAPSHOT)
+
+schoolr-chat
+  ├── schoolr-libs (2.2-SNAPSHOT)
+  ├── schoolr-config (1.1-SNAPSHOT)
+  └── schoolr-persistence-libs (1.0-SNAPSHOT)
+
+schoolr-filemanager
+  ├── schoolr-libs (2.2-SNAPSHOT)
+  └── schoolr-config (1.1-SNAPSHOT)
+```
+
+<Note>
+Libraries must be installed to your local Maven repository before building applications.
+</Note>
+
+## Quarkus Profiles
+
+Each application supports three Quarkus configuration profiles:
+
+### %dev Profile
+
+- Local development mode
+- CORS enabled for `localhost:3000`, `localhost:3005`, `localhost:8080`
+- Liquibase migrations run at startup
+- JWT public keys from SuperTokens dev environment
+- Verbose logging
+- Hot reload enabled
+
+### %test Profile
+
+- Unit and integration testing
+- PostgreSQL DevServices (testcontainers)
+- MQTT and schedulers disabled
+- In-memory configurations
+
+### %prod Profile
+
+- Production deployment
+- CORS from `CORS_ORIGINS` environment variable
+- JWT from PEM file
+- All configuration from environment variables
+- JSON structured logging
+- Liquibase migrations manual (controlled by ops)
+
+## Common Dependencies
+
+All applications share these Quarkus extensions:
+
+- `quarkus-arc` - CDI dependency injection
+- `quarkus-kubernetes` - Kubernetes manifest generation
+- `quarkus-smallrye-health` - Health checks
+- `quarkus-container-image-jib` - Container image building
+- `quarkus-config-yaml` - YAML configuration support
+- `quarkus-logging-json` - Structured JSON logging
+- `quarkus-junit5` - Testing framework
+
+## Build Output
+
+Each application produces:
+
+- **JAR**: `target/quarkus-app/quarkus-run.jar` (uber-jar)
+- **Container Image**: Built with Jib, pushed to GitLab registry
+- **Kubernetes Manifests**: Generated in `target/kubernetes/`
+
+<Accordion title="Why separate apps and libs?">
+The multi-module structure provides several benefits:
+
+- **Code Reuse**: Common utilities are shared across services without duplication
+- **Independent Deployment**: Each app can be deployed, scaled, and versioned independently
+- **Build Efficiency**: Libraries are built once and reused by all apps
+- **Clear Boundaries**: Business logic is separated from infrastructure concerns
+- **Team Organization**: Different teams can own different services
+</Accordion>
+
+<Accordion title="Can I add a new application?">
+Yes! To add a new application:
+
+1. Create a new directory under `apps/`
+2. Add a `pom.xml` with `<parent>` pointing to `apps/pom.xml`
+3. Add the module to `apps/pom.xml`
+4. Add dependencies to shared libs as needed
+5. Create `src/main/resources/application.yaml`
+6. Run `./mvnw clean install` from the root
+</Accordion>
+
+<Accordion title="What if I need a new shared library?">
+To add a new shared library:
+
+1. Create a new directory under `libs/`
+2. Add a `pom.xml` with `<parent>` pointing to `libs/pom.xml`
+3. Add the module to `libs/pom.xml`
+4. Install the lib: `./mvnw install -pl libs/your-new-lib`
+5. Add the lib as a dependency in apps that need it
+</Accordion>

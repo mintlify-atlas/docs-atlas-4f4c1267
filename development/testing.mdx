@@ -1,0 +1,413 @@
+---
+title: Testing
+description: Running unit and integration tests for Schoolr Backend
+---
+
+Schoolr Backend uses JUnit 5, MockK, and Quarkus testing utilities for unit and integration tests.
+
+## Test Framework
+
+The project uses:
+
+- **JUnit 5**: Test framework
+- **Quarkus JUnit5**: Quarkus-specific test extensions
+- **MockK**: Mocking library for Kotlin
+- **AssertJ**: Fluent assertions
+- **EasyRandom**: Test data generation
+- **DataFaker**: Realistic fake data generation
+
+## Test Configuration
+
+Tests run with the `%test` Quarkus profile, which provides:
+
+- **DevServices**: Automatic PostgreSQL testcontainers (for `schoolr-datamanagement`)
+- **Disabled Services**: MQTT and schedulers are disabled
+- **Test Database**: In-memory or container-based PostgreSQL
+- **No migrations**: Hibernate generates the schema automatically
+
+### Test Profile Settings
+
+From `application.yaml`:
+
+```yaml
+"%test":
+  quarkus:
+    datasource:
+      devservices:
+        enabled: true  # Automatic PostgreSQL container
+    hibernate-orm:
+      database:
+        generation: none
+  scheduler:
+    enabled: false
+  mqtt:
+    enabled: false
+  schoolr:
+    base-api: http://localhost:8080
+    base-url: http://localhost:3000
+    site-url: http://localhost:3000
+```
+
+## Running Tests
+
+### Run All Tests
+
+Run tests for the entire project:
+
+```bash
+./mvnw test
+```
+
+### Run Tests for Specific Module
+
+<Tabs>
+  <Tab title="datamanagement">
+    ```bash
+    ./mvnw test -pl apps/schoolr-datamanagement
+    ```
+    
+    Runs all tests in the datamanagement service.
+  </Tab>
+  
+  <Tab title="chat">
+    ```bash
+    ./mvnw test -pl apps/schoolr-chat
+    ```
+    
+    Runs all tests in the chat service.
+  </Tab>
+  
+  <Tab title="filemanager">
+    ```bash
+    ./mvnw test -pl apps/schoolr-filemanager
+    ```
+    
+    Runs all tests in the filemanager service.
+  </Tab>
+  
+  <Tab title="libs">
+    ```bash
+    ./mvnw test -pl libs/schoolr-libs
+    ```
+    
+    Runs all tests in the shared libraries.
+  </Tab>
+</Tabs>
+
+### Run Specific Test Class
+
+```bash
+./mvnw test -pl apps/schoolr-datamanagement -Dtest=UserServiceTest
+```
+
+### Run Specific Test Method
+
+```bash
+./mvnw test -pl apps/schoolr-datamanagement -Dtest=UserServiceTest#shouldCreateUser
+```
+
+## Test Types
+
+### Unit Tests
+
+Unit tests verify individual components in isolation using mocks:
+
+```kotlin
+@QuarkusTest
+class UserServiceTest {
+    
+    @InjectMock
+    lateinit var userRepository: UserRepository
+    
+    @Inject
+    lateinit var userService: UserService
+    
+    @Test
+    fun `should create user with valid data`() {
+        // Given
+        val userData = UserDTO(name = "John", email = "john@test.com")
+        every { userRepository.persist(any()) } returns Unit
+        
+        // When
+        val result = userService.createUser(userData)
+        
+        // Then
+        assertThat(result).isNotNull
+        verify { userRepository.persist(any()) }
+    }
+}
+```
+
+### Integration Tests
+
+Integration tests verify components working together with a real database:
+
+```kotlin
+@QuarkusTest
+@TestTransaction
+class UserRepositoryIT {
+    
+    @Inject
+    lateinit var userRepository: UserRepository
+    
+    @Test
+    fun `should persist and retrieve user`() {
+        // Given
+        val user = User(name = "Jane", email = "jane@test.com")
+        
+        // When
+        userRepository.persist(user)
+        val found = userRepository.findById(user.id)
+        
+        // Then
+        assertThat(found).isNotNull
+        assertThat(found?.email).isEqualTo("jane@test.com")
+    }
+}
+```
+
+### GraphQL Tests
+
+Test GraphQL endpoints with Quarkus REST Assured:
+
+```kotlin
+@QuarkusTest
+class UserResourceTest {
+    
+    @Test
+    fun `should query users via GraphQL`() {
+        given()
+            .contentType(ContentType.JSON)
+            .body("""
+                {
+                  "query": "{ users { id name email } }"
+                }
+            """)
+        .`when`()
+            .post("/graphql")
+        .then()
+            .statusCode(200)
+            .body("data.users.size()", greaterThan(0))
+    }
+}
+```
+
+## Test Database
+
+### DevServices (Automatic)
+
+For `schoolr-datamanagement` and `schoolr-chat`, Quarkus DevServices automatically starts a PostgreSQL testcontainer:
+
+- **Requires**: Docker running on your system
+- **Automatic cleanup**: Container is removed after tests
+- **Isolated**: Each test run gets a fresh database
+
+<Note>
+If Docker is not available, tests that require a database will fail. Install Docker or skip tests with `-DskipTests`.
+</Note>
+
+### Manual Database Configuration
+
+Override test database settings with environment variables:
+
+```bash
+export POSTGRES_HOST=localhost
+export POSTGRES_PORT=5432
+export POSTGRES_DB=schoolr-test
+export POSTGRES_USER=test-user
+export POSTGRES_PASSWORD=test-password
+
+./mvnw test -pl apps/schoolr-datamanagement
+```
+
+## Test Data Generation
+
+Use **EasyRandom** and **DataFaker** for generating test data:
+
+```kotlin
+import org.jeasy.random.EasyRandom
+import net.datafaker.Faker
+
+class TestDataBuilder {
+    private val random = EasyRandom()
+    private val faker = Faker()
+    
+    fun randomUser(): User {
+        return random.nextObject(User::class.java).apply {
+            name = faker.name().fullName()
+            email = faker.internet().emailAddress()
+        }
+    }
+}
+```
+
+## Mocking with MockK
+
+MockK provides Kotlin-friendly mocking:
+
+```kotlin
+import io.mockk.*
+import io.quarkiverse.mockk.InjectMock
+
+@QuarkusTest
+class PaymentServiceTest {
+    
+    @InjectMock
+    lateinit var stripeClient: StripeClient
+    
+    @Inject
+    lateinit var paymentService: PaymentService
+    
+    @Test
+    fun `should process payment successfully`() {
+        // Mock external service
+        every { stripeClient.charge(any()) } returns PaymentResult(success = true)
+        
+        // Execute
+        val result = paymentService.processPayment(100.0)
+        
+        // Verify
+        assertThat(result.success).isTrue()
+        verify(exactly = 1) { stripeClient.charge(any()) }
+    }
+}
+```
+
+## Test Coverage
+
+Generate test coverage reports with JaCoCo:
+
+```bash
+# Run tests with coverage
+./mvnw clean verify
+
+# View report
+open apps/schoolr-datamanagement/target/site/jacoco/index.html
+```
+
+<Note>
+The project does not currently have JaCoCo configured. You may need to add the plugin to the POM files.
+</Note>
+
+## Continuous Testing
+
+Run tests automatically on code changes in dev mode:
+
+```bash
+./mvnw quarkus:dev -pl apps/schoolr-datamanagement
+```
+
+In the Quarkus Dev UI:
+- Press `r` to run tests
+- Tests run automatically when code changes
+- View results in the terminal
+
+## Skipping Tests
+
+Skip tests during builds (useful for rapid iteration):
+
+```bash
+# Skip all tests
+./mvnw clean install -DskipTests
+
+# Skip only unit tests (run integration tests)
+./mvnw clean install -Dmaven.test.skip=false -DskipTests
+
+# Skip integration tests only
+./mvnw clean install -DskipITs
+```
+
+## Troubleshooting
+
+<Accordion title="Tests fail with 'Connection refused' to database">
+Ensure Docker is running for DevServices, or configure a test database:
+
+```bash
+# Check Docker
+docker ps
+
+# Or skip tests
+./mvnw clean install -DskipTests
+```
+</Accordion>
+
+<Accordion title="Tests fail with 'Could not find artifact'">
+Libraries must be installed before running app tests:
+
+```bash
+./mvnw install -pl libs/schoolr-libs,libs/schoolr-config,libs/schoolr-persistence-libs -am -DskipTests
+```
+</Accordion>
+
+<Accordion title="MQTT errors in tests">
+MQTT is disabled in the `%test` profile. If you see MQTT errors, verify your `application.yaml` has:
+
+```yaml
+"%test":
+  mqtt:
+    enabled: false
+```
+</Accordion>
+
+<Accordion title="Scheduler runs during tests">
+Schedulers should be disabled in tests. Check your `application.yaml`:
+
+```yaml
+"%test":
+  scheduler:
+    enabled: false
+```
+</Accordion>
+
+<Accordion title="Tests are slow">
+Optimizations:
+
+1. **Parallel execution**: Add to POM
+   ```xml
+   <plugin>
+     <artifactId>maven-surefire-plugin</artifactId>
+     <configuration>
+       <parallel>classes</parallel>
+       <threadCount>4</threadCount>
+     </configuration>
+   </plugin>
+   ```
+
+2. **Reuse containers**: Use Quarkus DevServices
+
+3. **Skip integration tests**: `mvn test -DskipITs`
+</Accordion>
+
+## Best Practices
+
+<Check>**DO**: Use `@TestTransaction` for tests that modify the database</Check>
+<Check>**DO**: Mock external services (Stripe, WhatsApp, etc.) in unit tests</Check>
+<Check>**DO**: Use descriptive test names with backticks in Kotlin</Check>
+<Check>**DO**: Clean up test data in `@AfterEach` hooks</Check>
+
+<Warning>**DON'T**: Connect to production services in tests</Warning>
+<Warning>**DON'T**: Hardcode test data that could become stale</Warning>
+<Warning>**DON'T**: Disable tests instead of fixing them</Warning>
+
+## Quick Reference
+
+| Task | Command |
+|------|--------|
+| Run all tests | `./mvnw test` |
+| Test one module | `./mvnw test -pl apps/schoolr-datamanagement` |
+| Test one class | `./mvnw test -Dtest=UserServiceTest` |
+| Test one method | `./mvnw test -Dtest=UserServiceTest#shouldCreateUser` |
+| Skip tests | `./mvnw install -DskipTests` |
+| Continuous testing | `./mvnw quarkus:dev` (press 'r') |
+| Coverage report | `./mvnw verify` (then open `target/site/jacoco`) |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Building" icon="hammer" href="/development/building">
+    Learn how to build the project
+  </Card>
+  <Card title="Environment Variables" icon="sliders" href="/development/environment-variables">
+    Configure test environments
+  </Card>
+</CardGroup>

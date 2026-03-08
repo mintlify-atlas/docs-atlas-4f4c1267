@@ -1,0 +1,440 @@
+---
+title: "MinIO Integration"
+description: "Object storage with MinIO for file uploads and downloads"
+---
+
+# MinIO Object Storage
+
+Schoolr Backend uses [MinIO](https://min.io) as an S3-compatible object storage system for managing uploaded files, profile images, classroom materials, and video lesson notes.
+
+## Configuration
+
+MinIO configuration for the File Manager service:
+
+<ParamField path="MINIO_HOST" type="string" required>
+  MinIO server host URL
+  
+  **Default:** `http://127.0.0.1`
+</ParamField>
+
+<ParamField path="MINIO_PORT" type="string" required>
+  MinIO server port
+  
+  **Default:** `9000`
+</ParamField>
+
+<ParamField path="MINIO_ACCESS_KEY" type="string" required>
+  MinIO access key (username)
+  
+  **Default:** `minioadmin`
+</ParamField>
+
+<ParamField path="MINIO_SECRET_KEY" type="string" required>
+  MinIO secret key (password)
+  
+  **Default:** `minioadmin`
+</ParamField>
+
+<ParamField path="MINIO_BUCKET" type="string" required>
+  Default bucket name for file storage
+  
+  **Default:** `schoolr`
+</ParamField>
+
+From `schoolr-filemanager/application.yaml`:
+
+```yaml application.yaml
+minio:
+  host: ${MINIO_HOST:http://127.0.0.1}
+  port: ${MINIO_PORT:9000}
+  access-key: ${MINIO_ACCESS_KEY:minioadmin}
+  secret-key: ${MINIO_SECRET_KEY:minioadmin}
+  bucket: ${MINIO_BUCKET:schoolr}
+```
+
+<Warning>
+  Change default credentials (`minioadmin/minioadmin`) before deploying to production.
+</Warning>
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="File Upload" icon="upload">
+    Upload files up to 300MB with multipart support
+  </Card>
+  <Card title="Image Resizing" icon="crop">
+    Automatically resize profile images to 6 different sizes
+  </Card>
+  <Card title="Streaming Download" icon="download">
+    Efficient file downloads with streaming support
+  </Card>
+  <Card title="Batch Operations" icon="layer-group">
+    Upload and manage multiple files simultaneously
+  </Card>
+</CardGroup>
+
+## Setup
+
+### Option 1: Docker (Recommended)
+
+<Steps>
+  <Step title="Run MinIO Container">
+    ```bash
+    docker run -d \
+      --name schoolr-minio \
+      -p 9000:9000 \
+      -p 9001:9001 \
+      -e MINIO_ROOT_USER=minioadmin \
+      -e MINIO_ROOT_PASSWORD=minioadmin \
+      minio/minio server /data --console-address ":9001"
+    ```
+  </Step>
+  
+  <Step title="Access MinIO Console">
+    Open http://localhost:9001 in your browser
+    
+    Login with:
+    - **Username:** `minioadmin`
+    - **Password:** `minioadmin`
+  </Step>
+  
+  <Step title="Create Bucket">
+    In the MinIO console:
+    1. Click **Buckets** in the left sidebar
+    2. Click **Create Bucket**
+    3. Enter bucket name: `schoolr`
+    4. Click **Create Bucket**
+  </Step>
+  
+  <Step title="Set Bucket Policy (Optional)">
+    For public read access (profile images):
+    
+    ```json
+    {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Principal": {"AWS": ["*"]},
+          "Action": ["s3:GetObject"],
+          "Resource": ["arn:aws:s3:::schoolr/profile/*"]
+        }
+      ]
+    }
+    ```
+  </Step>
+</Steps>
+
+### Option 2: Docker Compose
+
+```yaml docker-compose.yml
+services:
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  minio_data:
+```
+
+Start MinIO:
+
+```bash
+docker compose up -d minio
+```
+
+## File Organization
+
+Files are organized in MinIO with the following structure:
+
+```
+schoolr/                      # Bucket name
+├── profile/                  # Profile images
+│   ├── {uuid}/               # User UUID
+│   │   ├── base.png         # Original image
+│   │   ├── 160.png          # 160x160
+│   │   ├── 144.png          # 144x144
+│   │   ├── 70.png           # 70x70
+│   │   ├── 40.png           # 40x40
+│   │   └── 35.png           # 35x35
+├── classroom/                # Classroom files
+│   ├── {classroom_uuid}/     # Classroom UUID
+│   │   ├── document.pdf
+│   │   └── slides.pptx
+└── videolesson/              # Video lesson materials
+    ├── {videolesson_uuid}/   # Video lesson UUID
+    │   ├── notes.pdf
+    │   └── worksheet.docx
+```
+
+## MinIO Client Usage
+
+The File Manager service uses the MinIO Java SDK:
+
+### Initialize MinIO Client
+
+```kotlin MinioService.kt
+import io.minio.MinioClient
+
+val minioClient = MinioClient.builder()
+    .endpoint("${minioHost}:${minioPort}")
+    .credentials(accessKey, secretKey)
+    .build()
+```
+
+### Upload File
+
+```kotlin
+fun uploadFile(
+    bucketName: String,
+    objectName: String,
+    filePath: Path,
+    contentType: String
+) {
+    minioClient.uploadObject(
+        UploadObjectArgs.builder()
+            .bucket(bucketName)
+            .`object`(objectName)
+            .filename(filePath.toString())
+            .contentType(contentType)
+            .build()
+    )
+    logger.info { "Uploaded $objectName to $bucketName" }
+}
+```
+
+### Upload from InputStream
+
+```kotlin
+fun uploadStream(
+    bucketName: String,
+    objectName: String,
+    stream: InputStream,
+    size: Long,
+    contentType: String
+) {
+    minioClient.putObject(
+        PutObjectArgs.builder()
+            .bucket(bucketName)
+            .`object`(objectName)
+            .stream(stream, size, -1)
+            .contentType(contentType)
+            .build()
+    )
+}
+```
+
+### Download File
+
+```kotlin
+fun downloadFile(
+    bucketName: String,
+    objectName: String
+): InputStream {
+    return minioClient.getObject(
+        GetObjectArgs.builder()
+            .bucket(bucketName)
+            .`object`(objectName)
+            .build()
+    )
+}
+```
+
+### Delete File
+
+```kotlin
+fun deleteFile(bucketName: String, objectName: String) {
+    minioClient.removeObject(
+        RemoveObjectArgs.builder()
+            .bucket(bucketName)
+            .`object`(objectName)
+            .build()
+    )
+    logger.info { "Deleted $objectName from $bucketName" }
+}
+```
+
+### List Files
+
+```kotlin
+fun listFiles(bucketName: String, prefix: String): List<String> {
+    val results = minioClient.listObjects(
+        ListObjectsArgs.builder()
+            .bucket(bucketName)
+            .prefix(prefix)
+            .recursive(true)
+            .build()
+    )
+    
+    return results.map { it.get().objectName() }
+}
+```
+
+## Image Resizing
+
+Profile images are automatically resized to 6 sizes using ImageMagick or Java's built-in image processing:
+
+```kotlin ImageService.kt
+fun resizeProfileImage(originalFile: Path, uuid: String): List<Path> {
+    val sizes = listOf(160, 144, 70, 40, 35)
+    val resizedFiles = mutableListOf<Path>()
+    
+    // Save original as "base.png"
+    val basePath = Files.copy(originalFile, Path.of("profile/$uuid/base.png"))
+    resizedFiles.add(basePath)
+    
+    // Resize to each size
+    sizes.forEach { size ->
+        val resized = resizeImage(originalFile, size, size)
+        val resizedPath = Path.of("profile/$uuid/${size}.png")
+        Files.copy(resized, resizedPath)
+        resizedFiles.add(resizedPath)
+    }
+    
+    return resizedFiles
+}
+
+private fun resizeImage(source: Path, width: Int, height: Int): Path {
+    val image = ImageIO.read(source.toFile())
+    val resized = BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
+    val graphics = resized.createGraphics()
+    graphics.drawImage(image, 0, 0, width, height, null)
+    graphics.dispose()
+    
+    val output = Files.createTempFile("resized", ".png")
+    ImageIO.write(resized, "png", output.toFile())
+    return output
+}
+```
+
+## Best Practices
+
+<Check>Use unique file names (UUIDs) to avoid collisions</Check>
+<Check>Set appropriate content types for proper browser handling</Check>
+<Check>Implement file size limits (300MB for Schoolr)</Check>
+<Check>Use object versioning for critical files</Check>
+<Check>Set up bucket lifecycle policies to clean up temporary files</Check>
+
+<Warning>
+  Always validate file types and scan for malware before storing in MinIO.
+</Warning>
+
+## Production Deployment
+
+### High Availability Setup
+
+For production, deploy MinIO in distributed mode:
+
+```bash
+# Start 4-node MinIO cluster
+minio server \
+  http://minio{1...4}.example.com/data{1...4} \
+  --console-address ":9001"
+```
+
+### S3-Compatible Configuration
+
+MinIO is S3-compatible, so you can use AWS SDK:
+
+```kotlin
+import software.amazon.awssdk.services.s3.S3Client
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials
+
+val s3Client = S3Client.builder()
+    .endpointOverride(URI.create("${minioHost}:${minioPort}"))
+    .credentialsProvider(
+        StaticCredentialsProvider.create(
+            AwsBasicCredentials.create(accessKey, secretKey)
+        )
+    )
+    .build()
+```
+
+### Backup Strategy
+
+<Steps>
+  <Step title="Enable Versioning">
+    ```bash
+    mc version enable schoolr-minio/schoolr
+    ```
+  </Step>
+  
+  <Step title="Set up Replication">
+    Replicate to a backup MinIO instance or S3:
+    ```bash
+    mc replicate add schoolr-minio/schoolr \
+      --remote-bucket backup-bucket \
+      --priority 1
+    ```
+  </Step>
+  
+  <Step title="Schedule Backups">
+    Use `mc mirror` in a cron job:
+    ```bash
+    # Daily backup at 2 AM
+    0 2 * * * mc mirror schoolr-minio/schoolr backup-minio/schoolr-backup
+    ```
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Connection refused">
+    **Cause:** MinIO not running or incorrect host/port
+    
+    **Solution:**
+    - Check MinIO is running: `docker ps | grep minio`
+    - Verify `MINIO_HOST` and `MINIO_PORT` are correct
+    - Test connection: `curl http://localhost:9000/minio/health/live`
+  </Accordion>
+  
+  <Accordion title="Access denied">
+    **Cause:** Incorrect credentials or insufficient permissions
+    
+    **Solution:**
+    - Verify `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY`
+    - Check user permissions in MinIO console
+    - Ensure bucket exists and has correct policies
+  </Accordion>
+  
+  <Accordion title="File upload fails">
+    **Cause:** File too large, bucket doesn't exist, or disk full
+    
+    **Solution:**
+    - Check file size is under 300MB limit
+    - Verify bucket exists: `mc ls schoolr-minio/`
+    - Check disk space on MinIO server
+    - Review MinIO server logs for errors
+  </Accordion>
+</AccordionGroup>
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="File Upload API" icon="upload" href="/api/files/upload">
+    REST endpoints for file uploads
+  </Card>
+  <Card title="File Download API" icon="download" href="/api/files/download">
+    REST endpoints for file downloads
+  </Card>
+  <Card title="File Manager Service" icon="folder" href="/services/filemanager">
+    Complete File Manager service documentation
+  </Card>
+  <Card title="Environment Variables" icon="gear" href="/development/environment-variables">
+    MinIO configuration reference
+  </Card>
+</CardGroup>

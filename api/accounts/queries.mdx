@@ -1,0 +1,527 @@
+---
+title: "Account Queries"
+description: "GraphQL queries for retrieving account information"
+---
+
+## me
+
+Retrieve the authenticated user's account information with extended details.
+
+### Request
+
+```graphql
+query {
+  me {
+    account {
+      uuid
+      email
+      phone
+      first_name
+      last_name
+      profilePhotoURL
+      birth_date
+      confirmed_email
+      confirmed_phone
+      full_name
+      accountType
+    }
+    enabled
+    tutorStatus
+    diplomaEnabled
+  }
+}
+```
+
+### Response
+
+<ResponseField name="account" type="Account" required>
+  The account entity containing core account information
+  
+  <Expandable title="Account fields">
+    <ResponseField name="uuid" type="String" required>
+      Unique identifier for the account
+    </ResponseField>
+    <ResponseField name="email" type="String">
+      Verified email address
+    </ResponseField>
+    <ResponseField name="phone" type="String">
+      Verified phone number
+    </ResponseField>
+    <ResponseField name="first_name" type="String">
+      User's first name
+    </ResponseField>
+    <ResponseField name="last_name" type="String">
+      User's last name
+    </ResponseField>
+    <ResponseField name="profilePhotoURL" type="String">
+      URL to the user's profile photo
+    </ResponseField>
+    <ResponseField name="birth_date" type="Date">
+      Date of birth in YYYY-MM-DD format
+    </ResponseField>
+    <ResponseField name="confirmed_email" type="DateTime">
+      Timestamp when email was confirmed
+    </ResponseField>
+    <ResponseField name="confirmed_phone" type="DateTime">
+      Timestamp when phone was confirmed
+    </ResponseField>
+    <ResponseField name="full_name" type="String">
+      Computed full name (first_name + last_name)
+    </ResponseField>
+    <ResponseField name="accountType" type="String">
+      Type of account (student, tutor, parent, admin)
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="enabled" type="Boolean">
+  Whether the account is enabled and can access the platform
+</ResponseField>
+
+<ResponseField name="tutorStatus" type="TutorStatus">
+  Tutor verification status (for tutor accounts only)
+</ResponseField>
+
+<ResponseField name="diplomaEnabled" type="Boolean">
+  Whether diploma verification is enabled (for tutor accounts)
+</ResponseField>
+
+### Authentication
+
+<Check>Requires authentication</Check>
+
+### Example Response
+
+```json
+{
+  "data": {
+    "me": {
+      "account": {
+        "uuid": "550e8400-e29b-41d4-a716-446655440000",
+        "email": "student@example.com",
+        "phone": "+393331234567",
+        "first_name": "Mario",
+        "last_name": "Rossi",
+        "profilePhotoURL": "https://cdn.schoolr.it/profiles/abc123.jpg",
+        "birth_date": "2005-06-15",
+        "confirmed_email": "2024-01-15T10:30:00Z",
+        "confirmed_phone": "2024-01-15T10:35:00Z",
+        "full_name": "Mario Rossi",
+        "accountType": "student"
+      },
+      "enabled": true,
+      "tutorStatus": null,
+      "diplomaEnabled": false
+    }
+  }
+}
+```
+
+---
+
+## checkAccount
+
+Check the current account's verification status including email, phone, and overall account status.
+
+### Request
+
+```graphql
+query {
+  checkAccount {
+    email
+    phone
+    email_to_be_confirmed
+    phone_to_be_confirmed
+    confirmedEmail
+    confirmedPhone
+    enabled
+    tutorStatus
+    checkOrder
+    accountDto {
+      uuid
+      firstName
+      lastName
+      profilePhotoURL
+    }
+    diplomaEnabled
+  }
+}
+```
+
+### Response
+
+<ResponseField name="email" type="String">
+  Current verified email address
+</ResponseField>
+
+<ResponseField name="phone" type="String">
+  Current verified phone number
+</ResponseField>
+
+<ResponseField name="email_to_be_confirmed" type="String">
+  Email pending verification
+</ResponseField>
+
+<ResponseField name="phone_to_be_confirmed" type="String">
+  Phone number pending verification
+</ResponseField>
+
+<ResponseField name="confirmedEmail" type="Boolean">
+  Whether the email has been confirmed
+</ResponseField>
+
+<ResponseField name="confirmedPhone" type="Boolean">
+  Whether the phone has been confirmed
+</ResponseField>
+
+<ResponseField name="enabled" type="Boolean">
+  Whether the account is fully enabled
+</ResponseField>
+
+<ResponseField name="tutorStatus" type="TutorStatus">
+  Status for tutor accounts (PENDING, APPROVED, REJECTED)
+</ResponseField>
+
+<ResponseField name="checkOrder" type="[String!]!">
+  Ordered list of verification steps required
+</ResponseField>
+
+<ResponseField name="accountDto" type="AccountDto">
+  Basic account information
+</ResponseField>
+
+<ResponseField name="diplomaEnabled" type="Boolean">
+  Whether diploma verification is enabled
+</ResponseField>
+
+### Authentication
+
+<Check>Requires authentication</Check>
+
+---
+
+## logout
+
+Log out the current user by invalidating their session cache.
+
+### Request
+
+```graphql
+query {
+  logout {
+    message
+    status
+  }
+}
+```
+
+### Response
+
+<ResponseField name="message" type="String" required>
+  Response message ("OK" on success)
+</ResponseField>
+
+<ResponseField name="status" type="Status" required>
+  SUCCESS or ERROR
+</ResponseField>
+
+### Authentication
+
+<Check>Requires authentication</Check>
+
+---
+
+## checkEmail
+
+Check if an email address is already registered in the system.
+
+### Request
+
+```graphql
+query CheckEmail($email: String!) {
+  checkEmail(email: $email) {
+    message
+    status
+  }
+}
+```
+
+### Parameters
+
+<ParamField path="email" type="String" required>
+  Email address to check
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="String" required>
+  Error message if email is taken, empty string if available
+</ResponseField>
+
+<ResponseField name="status" type="Status" required>
+  ERROR if email exists, SUCCESS if available
+</ResponseField>
+
+### Example Request
+
+```json
+{
+  "email": "test@example.com"
+}
+```
+
+### Example Response
+
+```json
+{
+  "data": {
+    "checkEmail": {
+      "message": "",
+      "status": "SUCCESS"
+    }
+  }
+}
+```
+
+---
+
+## checkParentEmail
+
+Check if an email can be used for a parent account (not already used by another parent or the student themselves).
+
+### Request
+
+```graphql
+query CheckParentEmail($email: String!) {
+  checkParentEmail(email: $email) {
+    message
+    status
+  }
+}
+```
+
+### Parameters
+
+<ParamField path="email" type="String" required>
+  Parent email address to check
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="String" required>
+  Error message if email cannot be used, empty string if available
+</ResponseField>
+
+<ResponseField name="status" type="Status" required>
+  ERROR if email is invalid, SUCCESS if available
+</ResponseField>
+
+### Authentication
+
+<Check>Requires authentication (student account)</Check>
+
+### Error Cases
+
+- Email already associated with another parent
+- Email belongs to the student themselves
+
+---
+
+## checkPhone
+
+Check if a phone number is already registered in the system.
+
+### Request
+
+```graphql
+query CheckPhone($phone: String!) {
+  checkPhone(phone: $phone) {
+    message
+    status
+  }
+}
+```
+
+### Parameters
+
+<ParamField path="phone" type="String" required>
+  Phone number to check (format: country code + number, e.g., "+393331234567")
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="String" required>
+  Error message if phone is taken, empty string if available
+</ResponseField>
+
+<ResponseField name="status" type="Status" required>
+  ERROR if phone exists, SUCCESS if available
+</ResponseField>
+
+---
+
+## getAccountInfo
+
+Retrieve basic public information about an account by UUID.
+
+### Request
+
+```graphql
+query GetAccountInfo($uuid: String!) {
+  getAccountInfo(uuid: $uuid) {
+    uuid
+    first_name
+    last_name
+    full_name
+    profilePhotoURL
+    accountType
+  }
+}
+```
+
+### Parameters
+
+<ParamField path="uuid" type="String" required>
+  UUID of the account to retrieve
+</ParamField>
+
+### Response
+
+<ResponseField name="uuid" type="String">
+  Account UUID
+</ResponseField>
+
+<ResponseField name="first_name" type="String">
+  User's first name
+</ResponseField>
+
+<ResponseField name="last_name" type="String">
+  User's last name
+</ResponseField>
+
+<ResponseField name="full_name" type="String">
+  User's full name
+</ResponseField>
+
+<ResponseField name="profilePhotoURL" type="String">
+  URL to profile photo
+</ResponseField>
+
+<ResponseField name="accountType" type="String">
+  Type of account (student, tutor, parent, admin)
+</ResponseField>
+
+### Example Response
+
+```json
+{
+  "data": {
+    "getAccountInfo": {
+      "uuid": "550e8400-e29b-41d4-a716-446655440000",
+      "first_name": "Mario",
+      "last_name": "Rossi",
+      "full_name": "Mario Rossi",
+      "profilePhotoURL": "https://cdn.schoolr.it/profiles/abc123.jpg",
+      "accountType": "tutor"
+    }
+  }
+}
+```
+
+---
+
+## loadLegacyAccount
+
+Load information about a legacy account for migration purposes.
+
+### Request
+
+```graphql
+query LoadLegacyAccount($token: UUID!) {
+  loadLegacyAccount(token: $token) {
+    uuid
+    firstName
+    lastName
+    email
+    phone
+    profileInfo
+    education
+    lessons
+    experience
+    whoami
+    avatar
+    oldId
+    accountType
+    levels
+  }
+}
+```
+
+### Parameters
+
+<ParamField path="token" type="UUID" required>
+  Legacy account UUID token
+</ParamField>
+
+### Response
+
+<ResponseField name="uuid" type="UUID">
+  Legacy account UUID
+</ResponseField>
+
+<ResponseField name="firstName" type="String">
+  User's first name
+</ResponseField>
+
+<ResponseField name="lastName" type="String">
+  User's last name
+</ResponseField>
+
+<ResponseField name="email" type="String">
+  Email address
+</ResponseField>
+
+<ResponseField name="phone" type="String">
+  Phone number
+</ResponseField>
+
+<ResponseField name="profileInfo" type="String">
+  Profile information text
+</ResponseField>
+
+<ResponseField name="education" type="String">
+  Education information
+</ResponseField>
+
+<ResponseField name="lessons" type="String">
+  Lessons information
+</ResponseField>
+
+<ResponseField name="experience" type="String">
+  Experience information
+</ResponseField>
+
+<ResponseField name="whoami" type="String">
+  Personal description
+</ResponseField>
+
+<ResponseField name="avatar" type="String">
+  Avatar URL
+</ResponseField>
+
+<ResponseField name="oldId" type="BigInteger">
+  Old system account ID
+</ResponseField>
+
+<ResponseField name="accountType" type="String">
+  Account type
+</ResponseField>
+
+<ResponseField name="levels" type="[String!]">
+  Education levels
+</ResponseField>
+
+### Notes
+
+- Returns `null` if the account has already been recovered
+- Used during account migration from legacy systems

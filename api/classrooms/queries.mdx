@@ -1,0 +1,395 @@
+---
+title: 'Classroom Queries'
+description: 'GraphQL queries for retrieving classroom information, lessons, and packets'
+---
+
+## Single Classroom
+
+### singleClass
+
+Retrieve a single classroom by its ID, including user-specific information.
+
+<ParamField query="classroomId" type="BigInteger" required>
+  The unique identifier of the classroom
+</ParamField>
+
+<ResponseField name="classroom" type="MyClassroom">
+  Returns the classroom with user-specific context, or null if not found
+</ResponseField>
+
+```kotlin
+// ClassroomResource.kt:31
+@Query
+fun singleClass(classroomId: BigInteger): MyClassroom? {
+    val classroom = classroomService.getSingleClassroom(classroomId) 
+        ?: throw Exception("Classroom not found")
+    return classroomService.getMyClassesWithClassroomId(classroom.id)
+}
+```
+
+### classroomBySignature
+
+Retrieve a classroom by its unique signature.
+
+<ParamField query="signature" type="String" required>
+  The unique signature identifier for the classroom
+</ParamField>
+
+<ResponseField name="classroom" type="Classroom">
+  Returns the classroom entity or null if not found
+</ResponseField>
+
+```kotlin
+// ClassroomResource.kt:37
+@Query
+fun classroomBySignature(signature: String) = 
+    classroomService.getBySignature(signature)
+```
+
+### myClassroom
+
+Retrieve the authenticated user's classroom by signature.
+
+<ParamField query="signature" type="String" required>
+  The classroom signature
+</ParamField>
+
+<ResponseField name="classroom" type="MyClassroom">
+  Returns the user's classroom with personalized information
+</ResponseField>
+
+```kotlin
+// ClassroomResource.kt:41
+@Query
+fun myClassroom(signature: String) = 
+    classroomService.getMyClassroomBySignature(signature)
+```
+
+## Student Classrooms
+
+### studentClasses
+
+Retrieve paginated list of classrooms for the authenticated student (group classes only).
+
+<ParamField query="pagination" type="PaginationParams" default="{}">
+  Pagination parameters with page and size
+  - `page`: Page number (default: 0)
+  - `size`: Items per page (default: 10)
+</ParamField>
+
+<ResponseField name="classrooms" type="List<MyClassroom>">
+  Returns list of classrooms visible on cluster
+</ResponseField>
+
+```kotlin
+// ClassroomResource.kt:45
+@Query
+fun studentClasses(
+    @Name("pagination") @DefaultValue("{}") paginationParams: PaginationParams
+) = identityUtil.authImpersonateAccount {
+    val classroomIds = classroomService.getClassroomsPaged(
+        studentId = it.id,
+        classRoomType = ClassroomType.MULTIPLE,
+        page = paginationParams.page!!,
+        size = paginationParams.size!!
+    ).filter { classroom -> classroom.isVisibleOnCluster }
+     .map { classroom -> classroom.id }
+    
+    classroomService.getMyClassesWithClassroomIds(classroomIds = classroomIds)
+}
+```
+
+### userClasses
+
+Retrieve classrooms for the authenticated user (student or tutor) with optional search.
+
+<ParamField query="search" type="String" optional>
+  Search term to filter classrooms
+</ParamField>
+
+<ParamField query="pagination" type="PaginationParams" default="{}">
+  Pagination parameters
+</ParamField>
+
+<ResponseField name="classrooms" type="List<Classroom>">
+  Returns filtered and paginated classroom list
+</ResponseField>
+
+```kotlin
+// ClassroomResource.kt:62
+@Query
+fun userClasses(
+    @Name("search") search: String? = null,
+    @Name("pagination") @DefaultValue("{}") paginationParams: PaginationParams
+): List<Classroom> {
+    val user = identityUtil.account
+    
+    if (identityUtil.isTutor()) {
+        return classroomService.getClassroomsPaged(
+            tutorId = user.id,
+            accountId = user.id,
+            search = search,
+            page = paginationParams.page!!,
+            size = paginationParams.size!!
+        )
+    }
+    
+    if (identityUtil.isStudent()) {
+        return classroomService.getClassroomsPaged(
+            studentId = user.id,
+            accountId = user.id,
+            search = search,
+            page = paginationParams.page!!,
+            size = paginationParams.size!!
+        )
+    }
+    
+    // For impersonated accounts
+    val impersonateAccount = identityUtil.impersonateAccount
+    return classroomService.getClassroomsPaged(
+        studentId = impersonateAccount.id,
+        accountId = user.id,
+        search = search,
+        page = paginationParams.page!!,
+        size = paginationParams.size!!
+    )
+}
+```
+
+### studentClassesByStudent
+
+Retrieve all classrooms for a specific student.
+
+<ParamField query="studentId" type="BigInteger" required>
+  The student's ID
+</ParamField>
+
+<ResponseField name="classrooms" type="List<Classroom>">
+  All classrooms for the specified student
+</ResponseField>
+
+### countStudentClassesByStudent
+
+Count total classrooms for a specific student.
+
+<ParamField query="studentId" type="BigInteger" required>
+  The student's ID
+</ParamField>
+
+<ResponseField name="count" type="Long">
+  Total number of classrooms
+</ResponseField>
+
+## Tutor Classrooms
+
+### tutorClasses
+
+Retrieve all classrooms for the authenticated tutor.
+
+<ResponseField name="classrooms" type="List<MyClassroom>">
+  All classrooms where the authenticated user is the tutor
+</ResponseField>
+
+```kotlin
+// ClassroomResource.kt:127
+@Query
+fun tutorClasses() = identityUtil.authAccount {
+    classroomService.getMyClassesWithClassroomIds(
+        classroomIds = classroomService.getClassrooms(tutorId = it.id)
+            .map { classroom -> classroom.id }
+    )
+}
+```
+
+### tutorClassesByTutor
+
+Retrieve all classrooms for a specific tutor.
+
+<ParamField query="tutorId" type="BigInteger" required>
+  The tutor's ID
+</ParamField>
+
+<ResponseField name="classrooms" type="List<Classroom>">
+  All classrooms for the specified tutor
+</ResponseField>
+
+### countTutorClassesByTutor
+
+Count total classrooms for a specific tutor.
+
+<ParamField query="tutorId" type="BigInteger" required>
+  The tutor's ID
+</ParamField>
+
+<ResponseField name="count" type="Long">
+  Total number of classrooms
+</ResponseField>
+
+## Classroom Lessons
+
+### classroomPendingLessons
+
+Retrieve pending lessons for a classroom, sorted by date and time.
+
+<ParamField query="classroomSignature" type="String" required>
+  The classroom signature
+</ParamField>
+
+<ParamField query="pagination" type="PaginationParams" default="{}">
+  Pagination parameters
+</ParamField>
+
+<ResponseField name="lessons" type="List<Lesson>">
+  Pending lessons sorted by date (ASC) and time (ASC)
+</ResponseField>
+
+```kotlin
+// ClassroomResource.kt:139
+@Query
+fun classroomPendingLessons(
+    @Name("pagination") @DefaultValue("{}") paginationParams: PaginationParams,
+    classroomSignature: String,
+): List<Lesson> {
+    return lessonService.getLessons(
+        args = LessonPredicateParams(
+            classroomSignature = classroomSignature,
+            status = LessonStatus.PENDING,
+        ),
+        pageParams = PageParams(
+            page = paginationParams.page!!,
+            size = paginationParams.size!!
+        ),
+        sortBy = listOf(
+            Tuple2.of(Lesson_.LESSON_DATE, "ASC"), 
+            Tuple2.of(Lesson_.LESSON_TIME, "ASC")
+        )
+    )
+}
+```
+
+### countClassroomPendingLessons
+
+Count pending lessons for a classroom.
+
+<ParamField query="classroomSignature" type="String" required>
+  The classroom signature
+</ParamField>
+
+<ResponseField name="count" type="Long">
+  Total number of pending lessons
+</ResponseField>
+
+### classroomConfirmedLessons
+
+Retrieve confirmed lessons for a classroom, sorted by date and time.
+
+<ParamField query="classroomSignature" type="String" required>
+  The classroom signature
+</ParamField>
+
+<ParamField query="pagination" type="PaginationParams" default="{}">
+  Pagination parameters
+</ParamField>
+
+<ResponseField name="lessons" type="List<Lesson>">
+  Confirmed lessons sorted by date (ASC) and time (ASC)
+</ResponseField>
+
+### countClassroomConfirmedLessons
+
+Count confirmed lessons for a classroom.
+
+<ParamField query="classroomSignature" type="String" required>
+  The classroom signature
+</ParamField>
+
+<ResponseField name="count" type="Long">
+  Total number of confirmed lessons
+</ResponseField>
+
+### classroomDoneLessons
+
+Retrieve completed lessons for a classroom, sorted by most recent first.
+
+<ParamField query="classroomSignature" type="String" required>
+  The classroom signature
+</ParamField>
+
+<ParamField query="pagination" type="PaginationParams" default="{}">
+  Pagination parameters
+</ParamField>
+
+<ResponseField name="lessons" type="List<Lesson>">
+  Completed lessons sorted by date (DESC) and time (DESC)
+</ResponseField>
+
+```kotlin
+// ClassroomResource.kt:205
+@Query
+fun classroomDoneLessons(
+    @Name("pagination") @DefaultValue("{}") paginationParams: PaginationParams,
+    classroomSignature: String,
+): List<Lesson> {
+    return lessonService.getLessons(
+        args = LessonPredicateParams(
+            classroomSignature = classroomSignature,
+            status = LessonStatus.DONE,
+        ),
+        pageParams = PageParams(
+            page = paginationParams.page!!,
+            size = paginationParams.size!!
+        ),
+        sortBy = listOf(
+            Tuple2.of(Lesson_.LESSON_DATE, "DESC"), 
+            Tuple2.of(Lesson_.LESSON_TIME, "DESC")
+        )
+    )
+}
+```
+
+### countClassroomDoneLessons
+
+Count completed lessons for a classroom.
+
+<ParamField query="classroomSignature" type="String" required>
+  The classroom signature
+</ParamField>
+
+<ResponseField name="count" type="Long">
+  Total number of completed lessons
+</ResponseField>
+
+## Classroom Packets
+
+### classroomPackets
+
+Retrieve lesson packets associated with a classroom (completed or pending payments).
+
+<ParamField query="classroomSignature" type="String" required>
+  The classroom signature
+</ParamField>
+
+<ResponseField name="packets" type="List<StudentPacket>">
+  Lesson packets with payment status DONE or PENDING
+</ResponseField>
+
+```kotlin
+// ClassroomResource.kt:237
+@Query
+fun classroomPackets(classroomSignature: String) =
+    classroomService.getPacketsByClassroomSignature(
+        classroomSignature = classroomSignature,
+        paymentStatuses = listOf(PaymentStatus.DONE, PaymentStatus.PENDING)
+    )
+```
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Classroom Mutations" icon="pen-to-square" href="/api/classrooms/mutations">
+    Modify classroom data
+  </Card>
+  <Card title="Payments API" icon="credit-card" href="/api/payments/overview">
+    Learn about classroom payments
+  </Card>
+</CardGroup>

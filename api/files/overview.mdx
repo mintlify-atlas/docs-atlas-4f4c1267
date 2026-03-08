@@ -1,0 +1,190 @@
+---
+title: File Management Overview
+description: REST API for uploading, downloading, and managing files
+---
+
+The File Management API handles all file operations including uploads, downloads, image resizing, and file organization. Files are stored in MinIO object storage and organized by context (profiles, classrooms, video lessons).
+
+## Features
+
+- **Multiple Upload Contexts**: Support for profile images, classroom files, and video lesson notes
+- **Image Resizing**: Automatic generation of multiple image sizes for profiles
+- **Large File Support**: Handle files up to 300MB
+- **Streaming Downloads**: Efficient file retrieval without loading into memory
+- **File Organization**: Automatic folder structure based on context
+- **File Deletion**: Remove files with proper cleanup
+
+## File Size Limits
+
+<Warning>
+The maximum file size is **300MB** per upload. Files exceeding this limit will be rejected.
+</Warning>
+
+```
+Max file size: 300 MB (314,572,800 bytes)
+```
+
+## Storage Structure
+
+Files are organized in MinIO with the following structure:
+
+```
+bucket-name/
+├── profile/
+│   └── {uuid}/
+│       ├── base.png
+│       ├── 35.png
+│       ├── 40.png
+│       ├── 70.png
+│       ├── 144.png
+│       └── 160.png
+├── classroom_files/
+│   └── {classroom-uuid}/
+│       └── {file-uuid}___{filename}
+└── video-lesson-notes/
+    └── {lesson-uuid}/
+        └── {file-uuid}___{filename}
+```
+
+## Supported Operations
+
+<CardGroup cols={2}>
+  <Card title="Upload Files" icon="upload" href="/api/files/upload">
+    Upload profile images, classroom files, and lesson notes
+  </Card>
+  <Card title="Download Files" icon="download" href="/api/files/download">
+    Retrieve and stream files from storage
+  </Card>
+</CardGroup>
+
+## Base URL
+
+All file operations are performed under the `/media` path:
+
+```
+POST /media/upload-profile
+GET /media/file?filepath={path}
+DELETE /media/file?filepath={path}
+```
+
+## Authentication
+
+All file operations require authentication. Include your JWT token in the Authorization header:
+
+```http
+Authorization: Bearer YOUR_JWT_TOKEN
+```
+
+## Content Types
+
+The API automatically detects content types based on file extensions:
+
+- **Images**: `image/jpeg`, `image/png`, `image/gif`
+- **Documents**: `application/pdf`, `application/msword`
+- **Archives**: `application/zip`, `application/x-rar`
+- **Default**: `application/octet-stream`
+
+## Image Resizing
+
+Profile images are automatically resized to multiple dimensions:
+
+- **Base**: Maximum 500px width (preserves aspect ratio)
+- **160px**: Large thumbnail
+- **144px**: Medium thumbnail
+- **70px**: Small thumbnail
+- **40px**: Mini avatar
+- **35px**: Tiny avatar
+
+<Info>
+All resized images are in PNG format for consistent quality.
+</Info>
+
+## Error Responses
+
+Standard HTTP error codes are used:
+
+<ResponseField name="204" type="No Content">
+  No file was provided in the upload request
+</ResponseField>
+
+<ResponseField name="400" type="Bad Request">
+  Invalid request parameters or malformed data
+</ResponseField>
+
+<ResponseField name="401" type="Unauthorized">
+  Missing or invalid authentication token
+</ResponseField>
+
+<ResponseField name="413" type="Payload Too Large">
+  File exceeds 300MB size limit
+</ResponseField>
+
+<ResponseField name="500" type="Internal Server Error">
+  Server-side error during file processing
+</ResponseField>
+
+## File Naming Convention
+
+Uploaded files follow this naming pattern:
+
+```
+{UUID}___{original-filename}
+```
+
+**Example:**
+```
+a3b5c7d9-1234-5678-90ab-cdef12345678___homework.pdf
+```
+
+This ensures:
+- Unique file identifiers
+- No filename conflicts
+- Preservation of original filename for display
+
+## Best Practices
+
+<Steps>
+  <Step title="Validate File Size">
+    Check file size on the client before uploading to avoid rejected requests
+    
+    ```javascript
+    if (file.size > 300 * 1024 * 1024) {
+      alert('File too large. Maximum size is 300MB');
+      return;
+    }
+    ```
+  </Step>
+  
+  <Step title="Use Appropriate Context">
+    Choose the correct upload endpoint based on your use case:
+    - Profile images: `/upload-profile`
+    - Classroom files: `/upload-classroom-file`
+    - Lesson notes: `/upload-video-lesson-notes`
+  </Step>
+  
+  <Step title="Store File References">
+    Save the returned UUID and file path to reference files later
+    
+    ```json
+    {
+      "uuid": "a3b5c7d9-1234-5678-90ab-cdef12345678",
+      "path": "classroom-file?classroomUUID=xxx&filename=yyy"
+    }
+    ```
+  </Step>
+  
+  <Step title="Handle Errors Gracefully">
+    Implement retry logic for network failures and show user-friendly error messages
+  </Step>
+</Steps>
+
+## Integration with Chat
+
+Files uploaded through this API can be attached to chat messages:
+
+1. Upload file via File API
+2. Receive file path in response
+3. Include path in message metadata
+4. Message automatically shows file attachment
+
+See [Chat Messages](/api/chat/messages) for details on attaching files to messages.

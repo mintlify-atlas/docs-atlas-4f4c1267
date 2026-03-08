@@ -1,0 +1,279 @@
+---
+title: 'Data Management Service'
+description: 'Core API service for Schoolr platform backend operations'
+---
+
+## Overview
+
+The Data Management Service is the main backend API service for the Schoolr platform. It handles core business logic including user management, lesson scheduling, payments, tutoring features, and integrations with external services.
+
+<CardGroup cols={2}>
+  <Card title="GraphQL API" icon="diagram-project">
+    Primary API interface using GraphQL for flexible data queries
+  </Card>
+  <Card title="REST Endpoints" icon="route">
+    REST APIs for webhooks and specific integrations
+  </Card>
+  <Card title="Real-time Messaging" icon="bolt">
+    MQTT-based messaging for chat notifications
+  </Card>
+  <Card title="Scheduled Jobs" icon="clock">
+    Background tasks for lesson management and payments
+  </Card>
+</CardGroup>
+
+## Service Configuration
+
+### Port and Base URL
+
+- **Port**: `8080` (default)
+- **Base URL**: `http://localhost:8080` (dev) / `https://api.schoolr.net` (prod)
+- **GraphQL Endpoint**: `/graphql`
+- **GraphQL UI**: `/graphql-ui` (always enabled)
+
+### Database Configuration
+
+The service uses PostgreSQL as its primary database:
+
+```yaml
+datasource:
+  db-kind: postgresql
+  username: ${POSTGRES_USER:schoolr-user}
+  password: ${POSTGRES_PASSWORD:password}
+  jdbc:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:5432/${POSTGRES_DB:schoolr}
+```
+
+<Note>
+The service uses Liquibase for database migrations. Migration files are located in `db/changelog/master.xml`.
+</Note>
+
+## Key Features
+
+### User & Account Management
+
+<CardGroup cols={2}>
+  <Card title="Account Service" icon="user">
+    User registration, authentication, and profile management
+  </Card>
+  <Card title="Student Service" icon="graduation-cap">
+    Student-specific features and data
+  </Card>
+  <Card title="Tutor Service" icon="chalkboard-user">
+    Tutor profiles, availability, and qualifications
+  </Card>
+  <Card title="Admin Service" icon="user-shield">
+    Administrative operations and platform management
+  </Card>
+</CardGroup>
+
+### Lesson Management
+
+The service provides comprehensive lesson management capabilities:
+
+- **Lesson Booking** - Book lessons between students and tutors
+- **Lesson Requests** - Handle lesson request workflow
+- **Lesson Responses** - Manage tutor responses to lesson requests
+- **Lesson Rooms** - Integration with virtual classroom providers (TheLessonSpace)
+- **Video Lessons** - Recorded lesson content management
+
+### Payment & Billing
+
+<CardGroup cols={2}>
+  <Card title="Stripe Integration" icon="stripe">
+    Payment processing via Stripe
+  </Card>
+  <Card title="Packet System" icon="box">
+    Lesson credit packages for students
+  </Card>
+  <Card title="Invoicing" icon="file-invoice">
+    Invoice generation via Fatture in Cloud
+  </Card>
+  <Card title="Transfers" icon="money-bill-transfer">
+    Automated tutor payment transfers
+  </Card>
+</CardGroup>
+
+### Notifications
+
+The service integrates with Novu for multi-channel notifications:
+
+- Email notifications
+- SMS notifications (via custom SMS gateway)
+- WhatsApp notifications
+- In-app notifications
+
+Configuration reference (`application.yaml:133-135`):
+
+```yaml
+novu:
+  apikey: ${NOVU_API_KEY}
+  serverUrl: ${NOVU_SERVER_URL}
+```
+
+## GraphQL Resources
+
+The service exposes the following GraphQL resources (located in `/src/main/java/it/simultech/dm/resources/`):
+
+### Core Resources
+
+| Resource | Purpose |
+|----------|---------|
+| `AccountResource` | User account operations (login, profile, preferences) |
+| `StudentResource` | Student-specific queries and mutations |
+| `TutorResource` | Tutor-specific queries and mutations |
+| `AdminResource` | Administrative operations |
+| `AnalyticsResource` | Platform analytics and reporting |
+
+### Lesson Resources
+
+| Resource | Purpose |
+|----------|---------|
+| `LessonResource` | Lesson CRUD operations |
+| `LessonRequestResource` | Lesson request workflow |
+| `LessonResponseResource` | Tutor responses to lesson requests |
+| `LessonRoomResource` | Virtual classroom management |
+| `BookLessonResource` | Lesson booking operations |
+| `VideoLessonResource` | Recorded lesson content |
+
+### Payment Resources
+
+| Resource | Purpose |
+|----------|---------|
+| `PaymentResource` | Payment processing |
+| `BuyPacketResource` | Lesson credit package purchases |
+| `PacketResource` | Packet management |
+| `InvoiceResource` | Invoice generation and retrieval |
+| `VoucherResource` | Discount vouchers |
+| `CouponResource` | Promotional coupons |
+
+### Additional Resources
+
+- `SubjectResource` - Academic subjects
+- `ClassroomResource` - Classroom sessions
+- `NotificationResource` - Notification preferences
+- `PartnerResource` - Partner program management
+- `PodcastResource` - Podcast content
+- `FriendsResource` - Referral program
+
+## REST Resources
+
+REST endpoints are located in `/src/main/java/it/simultech/dm/rest_resources/`:
+
+| Endpoint | Purpose |
+|----------|---------|
+| `/healthz` | Health check endpoint |
+| `/api/stripe/webhook` | Stripe webhook handler |
+| `/api/whatsapp/webhook` | WhatsApp webhook handler |
+| `/api/novu/webhook` | Novu notification webhook |
+| `/api/jwks` | JWT public key endpoint |
+| `/api/form` | Form submission handler |
+
+## Dependencies & Integrations
+
+### External Services
+
+<CardGroup cols={2}>
+  <Card title="SuperTokens" icon="key">
+    Authentication and session management
+  </Card>
+  <Card title="Stripe" icon="stripe-s">
+    Payment processing
+  </Card>
+  <Card title="Novu" icon="bell">
+    Multi-channel notifications
+  </Card>
+  <Card title="TheLessonSpace" icon="video">
+    Virtual classroom provider
+  </Card>
+  <Card title="Fatture in Cloud" icon="file-invoice-dollar">
+    Italian invoice management
+  </Card>
+  <Card title="WhatsApp Business" icon="whatsapp">
+    WhatsApp messaging integration
+  </Card>
+</CardGroup>
+
+### Internal Services
+
+- **Chat Service** (`port 9090`) - Real-time messaging via MQTT
+- **File Manager Service** (`port 9099`) - File storage and retrieval
+
+## MQTT Messaging
+
+The service uses MQTT for real-time chat message notifications:
+
+```yaml
+mqtt:
+  host: ${MQTT_HOST}
+  port: ${MQTT_PORT:1883}
+  connector: smallrye-mqtt
+  enabled: ${MQTT_ENABLED:true}
+```
+
+**Topics:**
+- `chat-message-notification/#` - Incoming chat messages
+- `chat-messages-out` - Outgoing chat messages
+
+## Technology Stack
+
+<CardGroup cols={3}>
+  <Card title="Quarkus" icon="cube">
+    Java/Kotlin framework
+  </Card>
+  <Card title="Kotlin" icon="code">
+    Primary language (v1.9.24)
+  </Card>
+  <Card title="Hibernate ORM" icon="database">
+    Database ORM with Panache
+  </Card>
+  <Card title="SmallRye GraphQL" icon="diagram-project">
+    GraphQL implementation
+  </Card>
+  <Card title="Liquibase" icon="database">
+    Database migrations
+  </Card>
+  <Card title="RESTEasy Reactive" icon="bolt">
+    Reactive REST endpoints
+  </Card>
+</CardGroup>
+
+## Environment Variables
+
+Key environment variables for configuration:
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `POSTGRES_HOST` | Database host | `localhost` |
+| `POSTGRES_DB` | Database name | `schoolr` |
+| `POSTGRES_USER` | Database user | `schoolr-user` |
+| `CORS_ORIGINS` | Allowed CORS origins | Environment-specific |
+| `JWT_KEY_PATH` | JWT public key path | `keys/publickey-prod.pem` |
+| `STRIPE_SECRET_KEY` | Stripe API key | - |
+| `NOVU_API_KEY` | Novu API key | - |
+| `AUTH_CONNECTION_URI` | SuperTokens URI | - |
+| `MQTT_HOST` | MQTT broker host | `34.154.145.9` |
+
+<Warning>
+The scheduler is disabled in development mode by default. Enable it with `SCHEDULER_ENABLED=true` for testing scheduled tasks.
+</Warning>
+
+## Source Code Reference
+
+- **Main Directory**: `/apps/schoolr-datamanagement/`
+- **Configuration**: `src/main/resources/application.yaml`
+- **GraphQL Resources**: `src/main/java/it/simultech/dm/resources/`
+- **REST Resources**: `src/main/java/it/simultech/dm/rest_resources/`
+- **Services**: `src/main/java/it/simultech/dm/services/`
+- **Entities**: `src/main/java/it/simultech/dm/entity/`
+
+## Related Services
+
+<CardGroup cols={2}>
+  <Card title="Chat Service" icon="comments" href="/services/chat">
+    Real-time messaging service
+  </Card>
+  <Card title="File Manager" icon="folder" href="/services/filemanager">
+    File storage and management
+  </Card>
+</CardGroup>

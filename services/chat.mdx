@@ -1,0 +1,367 @@
+---
+title: 'Chat Service'
+description: 'Real-time messaging service for Schoolr platform'
+---
+
+## Overview
+
+The Chat Service is a dedicated microservice that handles real-time messaging functionality for the Schoolr platform. It manages chat rooms, messages, and real-time subscriptions using GraphQL and MQTT for message delivery.
+
+<CardGroup cols={2}>
+  <Card title="GraphQL API" icon="diagram-project">
+    Query and mutation operations for chat
+  </Card>
+  <Card title="Real-time Subscriptions" icon="satellite-dish">
+    WebSocket-based GraphQL subscriptions
+  </Card>
+  <Card title="MQTT Integration" icon="bolt">
+    Message broker for scalable real-time delivery
+  </Card>
+  <Card title="PostgreSQL Storage" icon="database">
+    Persistent message and room storage
+  </Card>
+</CardGroup>
+
+## Service Configuration
+
+### Port and Base URL
+
+- **Port**: `9090`
+- **Base URL**: `http://localhost:9090` (dev)
+- **GraphQL Endpoint**: `/graphql`
+- **GraphQL UI**: Enabled (configurable via `ENABLE_GRAPHQL_UI`)
+
+Configuration reference (`application.yaml:3-4`):
+
+```yaml
+quarkus:
+  http:
+    port: 9090
+```
+
+### Database Configuration
+
+The service uses a dedicated PostgreSQL database:
+
+```yaml
+datasource:
+  db-kind: postgresql
+  username: ${POSTGRES_USER:schoolr-user}
+  password: ${POSTGRES_PASSWORD:password}
+  jdbc:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:5432/${POSTGRES_DB:schoolr-chat}
+```
+
+<Note>
+The chat service uses its own database (`schoolr-chat`) separate from the main data management service for better scalability and isolation.
+</Note>
+
+## Key Features
+
+### Room Management
+
+<CardGroup cols={2}>
+  <Card title="Create Rooms" icon="plus">
+    Create new chat rooms with unique topics
+  </Card>
+  <Card title="Query Rooms" icon="search">
+    Retrieve room information and metadata
+  </Card>
+  <Card title="Room Subscribers" icon="users">
+    Track participants in each room
+  </Card>
+  <Card title="Room Metadata" icon="tags">
+    Custom metadata for room configuration
+  </Card>
+</CardGroup>
+
+### Message Management
+
+The service provides comprehensive message handling:
+
+- **Send Messages** - Create and publish messages to rooms
+- **Message History** - Query historical messages with pagination
+- **File Messages** - Handle messages with file attachments
+- **Message Metadata** - Support for custom message metadata (images, files, etc.)
+- **Real-time Delivery** - MQTT-based message broadcasting
+
+### Real-time Subscriptions
+
+GraphQL subscriptions enable real-time message delivery to clients:
+
+```graphql
+subscription {
+  messageCreated(topic: "room-uuid") {
+    uuid
+    message
+    senderUUID
+    createdAt
+    metadata {
+      key
+      value
+    }
+  }
+}
+```
+
+## GraphQL API
+
+The Chat Service exposes a single GraphQL resource: `ChatResource` (`src/main/java/it/simultech/chat/resources/ChatResource.kt`).
+
+### Queries
+
+| Query | Description | Parameters |
+|-------|-------------|------------|
+| `getRooms` | Get all available rooms | None |
+| `getRoomByUUID` | Get a specific room by UUID | `uuid: String` |
+| `getMessages` | Get messages from a room (paginated) | `room_uuid: String`, `index: Int`, `items: Int` |
+| `getMessagesWithFiles` | Get messages containing files | `room_uuid: String`, `index: Int`, `items: Int` |
+| `countMessagesWithFiles` | Count messages with file attachments | `room_uuid: String` |
+
+### Mutations
+
+| Mutation | Description | Input |
+|----------|-------------|-------|
+| `createMessage` | Send a new message to a room | `MessageDto` (room_uuid, message, metadata) |
+| `createRoom` | Create a new chat room | `topic: String` |
+
+Reference: `ChatResource.kt:72-82`
+
+```kotlin
+@Mutation
+fun createMessage(messageInput: MessageDto): ChatMessageOutDto {
+    val uuid = identityUtil.accountUUID ?: throw Exception("User UUID not provided")
+    val message = messageService.publishMessage(messageInput = messageInput, uuid = uuid)
+    return message.toMessageOut()
+}
+```
+
+### Subscriptions
+
+| Subscription | Description | Parameters |
+|--------------|-------------|------------|
+| `messageCreated` | Subscribe to new messages in a room | `topic: String` (room UUID) |
+
+Reference: `ChatResource.kt:85-91`
+
+```kotlin
+@Subscription
+fun messageCreated(topic: String): Multi<ChatMessageOutDto> {
+    return processorsSingleton
+        .getProcessor("chat-message/$topic")
+        .toHotStream()
+}
+```
+
+## Data Models
+
+### Message Entity
+
+Located in `src/main/java/it/simultech/chat/entity/main/Message.kt`:
+
+- `uuid` - Unique message identifier
+- `message` - Message content
+- `senderUUID` - User who sent the message
+- `room` - Associated chat room
+- `createdAt` - Timestamp
+- `metadata` - List of key-value metadata (MessageMetadata)
+
+### Room Entity
+
+Located in `src/main/java/it/simultech/chat/entity/main/Room.kt`:
+
+- `uuid` - Unique room identifier
+- `topic` - Room topic/name
+- `subscribers` - List of room participants
+- `metadata` - Room-level metadata
+- `messages` - Associated messages
+
+### Subscriber Entity
+
+Tracks user participation in rooms:
+
+- `uuid` - Subscriber identifier
+- `accountUUID` - User account UUID
+- `room` - Associated room
+
+## MQTT Messaging
+
+The service uses MQTT for scalable message distribution:
+
+```yaml
+mqtt:
+  host: ${MQTT_HOST:34.154.145.9}
+  port: ${MQTT_PORT:1883}
+  connector: smallrye-mqtt
+  enabled: ${MQTT_ENABLED:true}
+```
+
+### Message Channels
+
+**Incoming Channels:**
+
+| Channel | Topic | Purpose |
+|---------|-------|---------|
+| `chat-messages` | `$share/g/chat-message/#` | Messages from main service |
+| `filemanager-messages` | `$share/g/chat-message-filemanager/#` | File upload notifications |
+| `lessonrequest-messages` | `$share/g/chat-message-lessonrequest/#` | Lesson request updates |
+
+**Outgoing Channels:**
+
+| Channel | Purpose |
+|---------|---------|
+| `chat-messages-out` | Publish messages to MQTT broker |
+| `chat-topic-messages-out` | Topic-specific message publishing |
+
+<Note>
+The `$share/g/` prefix enables MQTT shared subscriptions for load balancing across multiple service instances.
+</Note>
+
+## Message Flow
+
+1. **Client sends message** via GraphQL mutation `createMessage`
+2. **Message is persisted** to PostgreSQL database
+3. **Message is published** to MQTT topic `chat-message/{room-uuid}`
+4. **MQTT broker distributes** to all subscribed service instances
+5. **Subscribers receive** via GraphQL subscription `messageCreated`
+
+## Integration with Other Services
+
+### File Manager Service
+
+The chat service receives file upload notifications from the File Manager service:
+
+- Topic: `chat-message-filemanager/#`
+- Subscription: `filemanager-messages`
+- Handler: `FileManagerSubscription.kt`
+
+When a file is uploaded to a room, the File Manager publishes a message containing:
+- `room_id` - Target chat room
+- `message` - Description (e.g., "Nuovo file")
+- `senderUUID` - User who uploaded the file
+- `messageMetadata` - File path and metadata
+
+Reference: File Manager `publishOnClassroom()` method
+
+### Data Management Service
+
+Receives lesson request notifications:
+
+- Topic: `chat-message-lessonrequest/#`
+- Subscription: `lessonrequest-messages`
+
+## Technology Stack
+
+<CardGroup cols={3}>
+  <Card title="Quarkus" icon="cube">
+    Java/Kotlin framework
+  </Card>
+  <Card title="Kotlin" icon="code">
+    Primary language (v1.9.24)
+  </Card>
+  <Card title="SmallRye GraphQL" icon="diagram-project">
+    GraphQL implementation
+  </Card>
+  <Card title="Hibernate ORM Panache" icon="database">
+    Database ORM
+  </Card>
+  <Card title="Liquibase" icon="database">
+    Database migrations
+  </Card>
+  <Card title="SmallRye Reactive Messaging" icon="bolt">
+    MQTT integration
+  </Card>
+</CardGroup>
+
+## Authentication
+
+The service uses JWT-based authentication with SuperTokens:
+
+**Development:**
+```yaml
+mp:
+  jwt:
+    verify:
+      publickey:
+        location: https://dev-{id}.supertokens.io/.well-known/jwks.json
+```
+
+**Production:**
+```yaml
+mp:
+  jwt:
+    verify:
+      publickey:
+        location: ${JWT_KEY_PATH:keys/publickey-prod.pem}
+```
+
+The `IdentityUtil` service extracts the authenticated user's UUID from the JWT token for authorization.
+
+## Environment Variables
+
+Key environment variables:
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `POSTGRES_HOST` | Database host | `localhost` |
+| `POSTGRES_DB` | Database name | `schoolr-chat` |
+| `POSTGRES_USER` | Database username | `schoolr-user` |
+| `POSTGRES_PASSWORD` | Database password | `password` |
+| `MQTT_HOST` | MQTT broker host | `34.154.145.9` |
+| `MQTT_PORT` | MQTT broker port | `1883` |
+| `MQTT_ENABLED` | Enable MQTT messaging | `true` |
+| `ENABLE_GRAPHQL_UI` | Enable GraphQL UI | `true` |
+| `LOG_LEVEL` | Logging level | `INFO` |
+| `AUTH_CONNECTION_URI` | SuperTokens URI | - |
+| `JWT_KEY_PATH` | JWT public key path (prod) | `keys/publickey-prod.pem` |
+
+## CORS Configuration
+
+**Development:**
+```yaml
+quarkus:
+  http:
+    cors:
+      methods: GET,PUT,POST,DELETE
+      origins: http://localhost:3000,http://127.0.0.1:3000
+```
+
+**Production:**
+```yaml
+quarkus:
+  http:
+    cors:
+      ~: true
+      methods: GET,PUT,POST,DELETE
+      origins: ${CORS_ORIGINS}
+```
+
+## Source Code Reference
+
+- **Main Directory**: `/apps/schoolr-chat/`
+- **Configuration**: `src/main/resources/application.yaml`
+- **GraphQL Resources**: `src/main/java/it/simultech/chat/resources/ChatResource.kt`
+- **Services**: `src/main/java/it/simultech/chat/services/`
+- **Entities**: `src/main/java/it/simultech/chat/entity/`
+- **Subscriptions**: `src/main/java/it/simultech/chat/subscriptions/`
+
+## Health Check
+
+The service provides a health check endpoint:
+
+- **Endpoint**: `/healthz`
+- **Method**: GET
+- **Response**: `{"status": "ok"}`
+
+Reference: `src/main/java/it/simultech/chat/resources/HealthCheckResource.kt`
+
+## Related Services
+
+<CardGroup cols={2}>
+  <Card title="Data Management" icon="database" href="/services/datamanagement">
+    Main API service for business logic
+  </Card>
+  <Card title="File Manager" icon="folder" href="/services/filemanager">
+    File storage and management
+  </Card>
+</CardGroup>

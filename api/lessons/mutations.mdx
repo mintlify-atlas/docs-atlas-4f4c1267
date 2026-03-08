@@ -1,0 +1,442 @@
+---
+title: 'Lesson Mutations'
+description: 'GraphQL mutations for creating, updating, and managing lessons'
+---
+
+## createLesson
+
+Creates a new lesson in the system.
+
+**Source**: `LessonResource.kt:124`
+
+**Authentication**: Required (Admin access)
+
+### Parameters
+
+<ParamField path="data" type="CreateUpdateLessonDto" required>
+  Lesson creation data:
+  - `lessonDate` (LocalDate) - Date of the lesson
+  - `lessonTime` (LocalTime) - Start time of the lesson
+  - `status` (LessonStatus) - Initial status (typically PENDING)
+  - `minutes` (BigInteger) - Duration in minutes
+  - `subjectId` (BigInteger) - ID of the subject being taught
+  - `classroomId` (BigInteger) - ID of the classroom
+</ParamField>
+
+### Returns
+
+`Lesson` - The created lesson object
+
+### Example
+
+```graphql
+mutation CreateNewLesson {
+  createLesson(
+    data: {
+      lessonDate: "2026-03-15"
+      lessonTime: "14:00:00"
+      status: PENDING
+      minutes: 60
+      subjectId: 123
+      classroomId: 456
+    }
+  ) {
+    id
+    uuid
+    lessonDate
+    lessonTime
+    status
+    minutes
+    subject {
+      id
+      name
+    }
+    classroom {
+      id
+      signature
+    }
+  }
+}
+```
+
+---
+
+## updateLesson
+
+Updates an existing lesson.
+
+**Source**: `LessonResource.kt:131`
+
+**Authentication**: Required (Admin access)
+
+### Parameters
+
+<ParamField path="id" type="BigInteger" required>
+  The ID of the lesson to update
+</ParamField>
+
+<ParamField path="data" type="CreateUpdateLessonDto" required>
+  Updated lesson data with the same structure as `createLesson`
+</ParamField>
+
+### Returns
+
+`Lesson` - The updated lesson object
+
+### Example
+
+```graphql
+mutation UpdateExistingLesson {
+  updateLesson(
+    id: 123
+    data: {
+      lessonDate: "2026-03-16"
+      lessonTime: "15:00:00"
+      status: CONFIRMED
+      minutes: 90
+      subjectId: 123
+      classroomId: 456
+    }
+  ) {
+    id
+    uuid
+    lessonDate
+    lessonTime
+    status
+  }
+}
+```
+
+---
+
+## moveLesson
+
+Reschedules a lesson to a different date and time.
+
+**Source**: `LessonResource.kt:139`
+
+### Parameters
+
+<ParamField path="lessonUUID" type="UUID" required>
+  The UUID of the lesson to move
+</ParamField>
+
+<ParamField path="data" type="MoveLessonDto" required>
+  New scheduling data:
+  - `lessonDate` (LocalDate) - New date for the lesson
+  - `lessonTime` (LocalTime) - New time for the lesson
+</ParamField>
+
+### Returns
+
+`Lesson` - The rescheduled lesson object
+
+### Example
+
+```graphql
+mutation RescheduleLesson {
+  moveLesson(
+    lessonUUID: "123e4567-e89b-12d3-a456-426614174000"
+    data: {
+      lessonDate: "2026-03-20"
+      lessonTime: "16:00:00"
+    }
+  ) {
+    id
+    uuid
+    lessonDate
+    lessonTime
+    status
+  }
+}
+```
+
+---
+
+## cancelLesson
+
+Cancels a lesson, setting its status to CANCELED.
+
+**Source**: `LessonResource.kt:145`
+
+### Parameters
+
+<ParamField path="lessonUUID" type="UUID" required>
+  The UUID of the lesson to cancel
+</ParamField>
+
+### Returns
+
+`Lesson` - The canceled lesson object with status CANCELED
+
+### Example
+
+```graphql
+mutation CancelBookedLesson {
+  cancelLesson(lessonUUID: "123e4567-e89b-12d3-a456-426614174000") {
+    id
+    uuid
+    status
+    lessonDate
+    lessonTime
+  }
+}
+```
+
+---
+
+## bookLesson
+
+Books a paid lesson for a student.
+
+**Source**: `BookLessonResource.kt:36`
+
+**Authentication**: Required
+
+### Parameters
+
+<ParamField path="data" type="BookLessonDto" required>
+  Booking data:
+  - `subjectId` (BigInteger) - ID of the subject
+  - `lessonResponseUUID` (UUID) - UUID from lesson request
+  - `classRoomSig` (String, required) - Classroom signature
+  - `minutes` (Long) - Lesson duration (default: 0)
+  - `lessonDate` (String) - Date in ISO format
+  - `lessonTime` (String) - Time in ISO format
+  - `message` (String) - Optional message for the tutor
+  - `paymentMethod` (PaymentMode) - Payment method (default: SINGLE)
+  - `friendIds` (List of Long) - IDs of friends joining
+  - `homeLesson` (Boolean) - Whether it's a home lesson (default: false)
+</ParamField>
+
+### Returns
+
+`BookLessonOutDto` - Booking result with payment and lesson details
+
+### Example
+
+```graphql
+mutation BookPaidLesson {
+  bookLesson(
+    data: {
+      subjectId: 123
+      lessonResponseUUID: "123e4567-e89b-12d3-a456-426614174000"
+      classRoomSig: "classroom-sig-123"
+      minutes: 60
+      lessonDate: "2026-03-15"
+      lessonTime: "14:00:00"
+      message: "Looking forward to the lesson!"
+      paymentMethod: PAID
+      friendIds: []
+      homeLesson: false
+    }
+  ) {
+    paymentTransactionId
+    paymentTransactionUUID
+    lessonId
+    lessonUUID
+    lessonResponseUUID
+    paymentId
+    paymentUUID
+    total
+    transactionAmount
+    countTransactions
+    enableVouchers
+    isHomeLesson
+  }
+}
+```
+
+---
+
+## bookFreeLesson
+
+Books a free lesson (no payment required).
+
+**Source**: `BookLessonResource.kt:45`
+
+### Parameters
+
+<ParamField path="data" type="BookLessonDto" required>
+  Same structure as `bookLesson`, but no payment will be processed
+</ParamField>
+
+### Returns
+
+`BookLessonOutDto` - Booking result (payment fields will be null/zero)
+
+### Example
+
+```graphql
+mutation BookFirstLesson {
+  bookFreeLesson(
+    data: {
+      subjectId: 123
+      lessonResponseUUID: "123e4567-e89b-12d3-a456-426614174000"
+      classRoomSig: "classroom-sig-123"
+      minutes: 60
+      lessonDate: "2026-03-15"
+      lessonTime: "14:00:00"
+      message: "This is my first lesson!"
+      paymentMethod: FREE
+      homeLesson: false
+    }
+  ) {
+    lessonId
+    lessonUUID
+    lessonResponseUUID
+    total
+    isHomeLesson
+  }
+}
+```
+
+---
+
+## bookTutorLesson
+
+Allows a tutor to book a lesson on behalf of a student.
+
+**Source**: `BookLessonResource.kt:50`
+
+### Parameters
+
+<ParamField path="data" type="BookLessonDto" required>
+  Same booking data structure as `bookLesson`
+</ParamField>
+
+### Returns
+
+`BookLessonOutDto` - Booking result with payment and lesson details
+
+### Example
+
+```graphql
+mutation TutorBookLesson {
+  bookTutorLesson(
+    data: {
+      subjectId: 123
+      classRoomSig: "classroom-sig-123"
+      minutes: 60
+      lessonDate: "2026-03-15"
+      lessonTime: "14:00:00"
+      paymentMethod: PAID
+      homeLesson: false
+    }
+  ) {
+    lessonId
+    lessonUUID
+    paymentTransactionUUID
+    total
+  }
+}
+```
+
+---
+
+## acceptLesson
+
+Tutor accepts a pending lesson, changing status to CONFIRMED.
+
+**Source**: `BookLessonResource.kt:56`
+
+**Authentication**: Required
+
+### Parameters
+
+<ParamField path="lesson_uuid" type="UUID" required>
+  The UUID of the lesson to accept
+</ParamField>
+
+### Returns
+
+`Lesson` - The accepted lesson with status CONFIRMED
+
+### Example
+
+```graphql
+mutation AcceptPendingLesson {
+  acceptLesson(lesson_uuid: "123e4567-e89b-12d3-a456-426614174000") {
+    id
+    uuid
+    status
+    lessonDate
+    lessonTime
+    student {
+      id
+      firstName
+      lastName
+    }
+    subject {
+      name
+    }
+  }
+}
+```
+
+---
+
+## refuseLesson
+
+Tutor refuses a pending lesson, changing status to REJECTED.
+
+**Source**: `BookLessonResource.kt:63`
+
+### Parameters
+
+<ParamField path="lesson_uuid" type="UUID" required>
+  The UUID of the lesson to refuse
+</ParamField>
+
+### Returns
+
+`Lesson` - The rejected lesson with status REJECTED
+
+### Example
+
+```graphql
+mutation RejectLesson {
+  refuseLesson(lesson_uuid: "123e4567-e89b-12d3-a456-426614174000") {
+    id
+    uuid
+    status
+    lessonDate
+    lessonTime
+  }
+}
+```
+
+---
+
+## Lesson State Transitions
+
+The following diagram shows the valid lesson state transitions:
+
+```
+PENDING
+  ├─→ CONFIRMED (via acceptLesson)
+  ├─→ REJECTED (via refuseLesson)
+  └─→ CANCELED (via cancelLesson)
+
+CONFIRMED
+  ├─→ COMPLETED (automatically after lesson ends)
+  ├─→ CANCELED (via cancelLesson)
+  └─→ RESCHEDULED (via moveLesson)
+
+CANCELED, REJECTED, COMPLETED
+  └─→ [Terminal states - no further transitions]
+```
+
+## Payment Mode Usage
+
+<Card title="FREE" icon="gift">
+  Used for first lessons, promotional lessons, or when a tutor offers a free session. Call `bookFreeLesson` mutation.
+</Card>
+
+<Card title="PAID" icon="credit-card">
+  Standard paid lessons that require payment processing. Call `bookLesson` mutation with payment details.
+</Card>
+
+<Card title="SINGLE" icon="receipt">
+  One-time payment for a single lesson (default mode). Used in `bookLesson` mutation.
+</Card>

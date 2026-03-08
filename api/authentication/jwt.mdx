@@ -1,0 +1,473 @@
+---
+title: 'JWT Authentication'
+description: 'JWT token structure, validation, and usage in Schoolr Backend'
+---
+
+## Overview
+
+Schoolor Backend uses **JSON Web Tokens (JWT)** for stateless authentication. JWTs are issued by SuperTokens and validated using the MicroProfile JWT specification.
+
+<Note>
+  All protected API endpoints require a valid JWT token in the `Authorization` header.
+</Note>
+
+## JWT Configuration
+
+### Public Key Verification
+
+JWT tokens are verified using public keys retrieved from the JWKS (JSON Web Key Set) endpoint:
+
+**Development:**
+```yaml
+mp:
+  jwt:
+    verify:
+      publickey:
+        location: https://supertokens.kube.simultech.it/.well-known/jwks.json
+```
+
+**Production:**
+```yaml
+mp:
+  jwt:
+    verify:
+      publickey:
+        location: ${JWT_KEY_PATH:keys/publickey-prod.pem}
+```
+
+<Warning>
+  Production environments can use either JWKS URL or a local PEM file. Ensure the public key source is properly secured.
+</Warning>
+
+## Token Structure
+
+### JWT Header
+
+```json
+{
+  "alg": "RS256",
+  "typ": "JWT",
+  "kid": "<key-id>"
+}
+```
+
+<ParamField path="alg" type="string" default="RS256">
+  Algorithm used for signing (RSA with SHA-256)
+</ParamField>
+
+<ParamField path="typ" type="string" default="JWT">
+  Token type
+</ParamField>
+
+<ParamField path="kid" type="string">
+  Key ID for identifying which public key to use for verification
+</ParamField>
+
+### JWT Payload (Claims)
+
+```json
+{
+  "sub": "<user-id>",
+  "iat": 1234567890,
+  "exp": 1234571490,
+  "iss": "https://supertokens.kube.simultech.it",
+  "impersonateToken": "<account-uuid>"
+}
+```
+
+#### Standard Claims
+
+<ParamField path="sub" type="string" required>
+  Subject - SuperTokens user ID (UUID format)
+</ParamField>
+
+<ParamField path="iat" type="number" required>
+  Issued At - Unix timestamp when the token was created
+</ParamField>
+
+<ParamField path="exp" type="number" required>
+  Expiration Time - Unix timestamp when the token expires
+</ParamField>
+
+<ParamField path="iss" type="string" required>
+  Issuer - SuperTokens server URL that issued the token
+</ParamField>
+
+#### Custom Claims
+
+<ParamField path="impersonateToken" type="string">
+  Account UUID for impersonation feature. When present, allows a parent/admin to act as another user.
+</ParamField>
+
+## Token Usage
+
+### Making Authenticated Requests
+
+Include the JWT token in the `Authorization` header:
+
+```bash
+GET /api/v1/accounts/me
+Host: api.schoolr.net
+Authorization: Bearer <jwt-token>
+```
+
+### Example with cURL
+
+```bash
+curl -X GET https://api.schoolr.net/api/v1/accounts/me \
+  -H "Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+### Example with JavaScript
+
+```javascript
+fetch('https://api.schoolr.net/api/v1/accounts/me', {
+  headers: {
+    'Authorization': `Bearer ${token}`
+  }
+})
+.then(response => response.json())
+.then(data => console.log(data));
+```
+
+### Example with Kotlin
+
+```kotlin
+val client = OkHttpClient()
+val request = Request.Builder()
+    .url("https://api.schoolr.net/api/v1/accounts/me")
+    .addHeader("Authorization", "Bearer $token")
+    .build()
+
+val response = client.newCall(request).execute()
+```
+
+## Token Validation
+
+### Automatic Validation
+
+Schoolor Backend automatically validates JWT tokens using MicroProfile JWT:
+
+1. **Signature Verification** - Validates token signature using public key from JWKS
+2. **Expiration Check** - Ensures token hasn't expired
+3. **Issuer Validation** - Verifies token was issued by trusted SuperTokens server
+
+### Manual Token Access
+
+Access JWT claims in your code:
+
+```kotlin
+import org.eclipse.microprofile.jwt.JsonWebToken
+import jakarta.inject.Inject
+
+class MyService {
+    @Inject
+    lateinit var jwt: JsonWebToken
+    
+    fun getUserId(): String {
+        return jwt.subject  // Returns 'sub' claim
+    }
+    
+    fun getCustomClaim(): String? {
+        return jwt.getClaim<String>("impersonateToken")
+    }
+}
+```
+
+## Identity Resolution
+
+### IdentityUtil Service
+
+The `IdentityUtil` service provides high-level identity management:
+
+```kotlin
+import it.simultech.dm.utils.IdentityUtil
+import jakarta.inject.Inject
+
+class AccountResource {
+    @Inject
+    lateinit var identityUtil: IdentityUtil
+    
+    @GET
+    @Path("/me")
+    fun getCurrentAccount(): Account {
+        return identityUtil.authAccount { account ->
+            // 'account' is the authenticated Account entity
+            account
+        }
+    }
+}
+```
+
+### Identity Resolution Flow
+
+1. Extract JWT principal from `SecurityIdentity`
+2. Get `sub` claim (SuperTokens user ID)
+3. Retrieve user metadata from SuperTokens (cached)
+4. Extract `appUserId` from metadata
+5. Load Account entity from database (cached)
+
+```kotlin
+val account: Account
+    get() {
+        val principal = securityIdentity.principal
+        
+        val uuid = when (principal::class.java) {
+            DefaultJWTCallerPrincipal::class.java -> 
+                (principal as DefaultJWTCallerPrincipal).subject
+            else -> throw Exception("User Anonymous")
+        }
+        
+        val user = authService.getUserMetadata(userId = uuid)
+        
+        return accountService.getCachedAccount(user.metadata?.appUserId!!)
+            ?: throw Exception("Account $uuid not found")
+    }
+```
+
+<Note>
+  User metadata and account lookups are cached for performance using Quarkus Cache.
+</Note>
+
+## Role-Based Access Control
+
+IdentityUtil provides role checking methods:
+
+```kotlin
+// Check user role
+if (identityUtil.isStudent()) {
+    // Student-specific logic
+}
+
+if (identityUtil.isTutor()) {
+    // Tutor-specific logic
+}
+
+if (identityUtil.isParent()) {
+    // Parent-specific logic
+}
+
+if (identityUtil.isAdmin()) {
+    // Admin-specific logic
+}
+```
+
+### Admin Secret Header
+
+Admins can also authenticate using a secret header:
+
+```bash
+GET /api/v1/accounts
+Host: api.schoolr.net
+x-schoolr-admin-secret: <secret>
+```
+
+Configured via:
+
+```yaml
+schoolr:
+  secret: ${SCHOOLR_SECRET}
+```
+
+<Warning>
+  The admin secret header bypasses normal authentication. Use with extreme caution and only in trusted environments.
+</Warning>
+
+## Impersonation Feature
+
+### Overview
+
+Schoolor supports account impersonation for parents and admins:
+
+- **Parents** can impersonate their child students
+- **Admins** can impersonate any account
+
+### Impersonation Token
+
+Add `impersonateToken` claim to JWT:
+
+```json
+{
+  "sub": "parent-user-id",
+  "impersonateToken": "student-account-uuid",
+  "iat": 1234567890,
+  "exp": 1234571490
+}
+```
+
+### Using Impersonation
+
+```kotlin
+// Use impersonated account if available, otherwise use authenticated account
+identityUtil.authImpersonateAccount { account ->
+    // 'account' is either impersonated or authenticated account
+    // Perform operations as this account
+    account
+}
+```
+
+### Impersonation Logic
+
+```kotlin
+fun <T> authImpersonateAccount(block: (Account) -> T): T {
+    if (isParent() && impersonateToken != null && 
+        canImpersonateAccount(impersonateUuid = impersonateAccount.uuid) || 
+        isAdmin()) {
+        
+        logger.info { 
+            "[IMPERSONATE ACCOUNT]: Logged user ${impersonateAccount.id} -> impersonate ${account.id}" 
+        }
+        return block.invoke(impersonateAccount)
+    }
+    
+    return block.invoke(account)
+}
+```
+
+<Note>
+  Impersonation attempts are logged for audit purposes.
+</Note>
+
+## JWKS Endpoint
+
+### Retrieving Public Keys
+
+SuperTokens provides public keys via JWKS endpoint:
+
+**Endpoint:** `GET /recipe/jwt/jwks`
+
+**Response:**
+
+```json
+{
+  "keys": [
+    {
+      "kty": "RSA",
+      "kid": "key-id-1",
+      "n": "<modulus>",
+      "e": "AQAB",
+      "alg": "RS256",
+      "use": "sig"
+    }
+  ]
+}
+```
+
+### JWKS Key Fields
+
+<ParamField path="kty" type="string">
+  Key type (e.g., "RSA")
+</ParamField>
+
+<ParamField path="kid" type="string">
+  Key ID - matches the `kid` in JWT header
+</ParamField>
+
+<ParamField path="n" type="string">
+  RSA modulus (base64url encoded)
+</ParamField>
+
+<ParamField path="e" type="string">
+  RSA exponent (base64url encoded, typically "AQAB")
+</ParamField>
+
+<ParamField path="alg" type="string">
+  Algorithm (e.g., "RS256")
+</ParamField>
+
+<ParamField path="use" type="string">
+  Public key use ("sig" for signature verification)
+</ParamField>
+
+### Fetching JWKS in Code
+
+```kotlin
+val jwks = superTokenClient.getJwks()
+jwks?.keys?.forEach { key ->
+    println("Key ID: ${key.kid}")
+    println("Algorithm: ${key.alg}")
+}
+```
+
+## Token Refresh
+
+<Note>
+  Token refresh is handled by SuperTokens SDKs on the client side. The backend validates tokens but does not directly issue or refresh them.
+</Note>
+
+For token refresh implementation, refer to SuperTokens client SDK documentation:
+- [SuperTokens Web SDK](https://supertokens.com/docs/guides)
+- [SuperTokens Mobile SDKs](https://supertokens.com/docs/guides)
+
+## Security Best Practices
+
+<Warning>
+  **Important Security Considerations:**
+  
+  - Always use HTTPS in production to prevent token interception
+  - Store tokens securely (never in localStorage, prefer httpOnly cookies)
+  - Implement token expiration and refresh
+  - Validate tokens on every protected request
+  - Monitor for suspicious authentication patterns
+  - Rotate JWKS keys regularly
+  - Log impersonation attempts for audit trails
+</Warning>
+
+### Token Expiration
+
+Tokens should have reasonable expiration times:
+
+- **Access tokens:** 15-60 minutes
+- **Refresh tokens:** 7-30 days
+
+### HTTPS Requirements
+
+```yaml
+# Production configuration
+quarkus:
+  http:
+    cors:
+      origins: https://app.schoolr.net,https://schoolr.net
+```
+
+## Troubleshooting
+
+### Common JWT Errors
+
+#### 401 Unauthorized
+
+**Cause:** Missing or invalid token
+
+**Solution:** Ensure `Authorization` header is present with valid JWT
+
+```bash
+Authorization: Bearer <valid-jwt-token>
+```
+
+#### Token Expired
+
+**Cause:** Token `exp` claim is in the past
+
+**Solution:** Refresh the token using SuperTokens SDK
+
+#### Invalid Signature
+
+**Cause:** Token signature doesn't match public key
+
+**Solution:** 
+- Verify JWKS endpoint is accessible
+- Check token wasn't tampered with
+- Ensure correct public key is being used
+
+#### User Anonymous Exception
+
+**Cause:** Security principal is not a JWT principal
+
+**Solution:** Ensure request includes valid JWT token in Authorization header
+
+## Related Resources
+
+- [Authentication Overview](/api/authentication/overview)
+- [SuperTokens Documentation](https://supertokens.com/docs)
+- [MicroProfile JWT Specification](https://github.com/eclipse/microprofile-jwt-auth)
+- [JWT.io Debugger](https://jwt.io/)

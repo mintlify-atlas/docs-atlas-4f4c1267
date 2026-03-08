@@ -1,0 +1,504 @@
+---
+title: File Download
+description: Retrieve and stream files from storage
+---
+
+The File Download API provides efficient streaming downloads for all file types with automatic content-type detection.
+
+## Download File by Path
+
+Retrieve any file using its storage path.
+
+### Endpoint
+
+```http
+GET /media/file?filepath={path}
+```
+
+### Parameters
+
+<ParamField query="filepath" type="string" required>
+  The full path to the file in storage (e.g., `profile/uuid/base.png`)
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X GET "https://api.schoolr.it/media/file?filepath=profile/a3b5c7d9-1234-5678-90ab-cdef12345678/base.png" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -o downloaded-image.png
+```
+
+```javascript
+// Direct download
+const filepath = 'profile/uuid/base.png';
+window.open(`/media/file?filepath=${encodeURIComponent(filepath)}`);
+
+// Fetch for processing
+const response = await fetch(`/media/file?filepath=${encodeURIComponent(filepath)}`, {
+  headers: {
+    'Authorization': 'Bearer YOUR_JWT_TOKEN'
+  }
+});
+
+if (response.ok) {
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  imgElement.src = url;
+}
+```
+
+### Response
+
+The file is streamed directly with appropriate content-type headers:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: image/png
+Content-Length: 245678
+
+[binary file data]
+```
+
+<Info>
+Files are streamed using 8KB buffers for efficient memory usage, supporting files of any size up to 300MB.
+</Info>
+
+## Download Classroom File
+
+Retrieve a file from a classroom.
+
+### Endpoint
+
+```http
+GET /media/classroom-file?classroomUUID={uuid}&filename={name}
+```
+
+### Parameters
+
+<ParamField query="classroomUUID" type="string" required>
+  The UUID of the classroom
+</ParamField>
+
+<ParamField query="filename" type="string" required>
+  The filename in the format `{uuid}___{original-name}`
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X GET "https://api.schoolr.it/media/classroom-file?classroomUUID=classroom-123&filename=uuid___homework.pdf" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -o homework.pdf
+```
+
+```javascript
+const classroomUUID = 'classroom-123';
+const filename = 'uuid___homework.pdf';
+
+const url = `/media/classroom-file?classroomUUID=${classroomUUID}&filename=${encodeURIComponent(filename)}`;
+
+// Option 1: Direct download link
+downloadLink.href = url;
+downloadLink.download = 'homework.pdf';
+
+// Option 2: Fetch and process
+const response = await fetch(url, {
+  headers: { 'Authorization': 'Bearer YOUR_JWT_TOKEN' }
+});
+
+const blob = await response.blob();
+const downloadUrl = URL.createObjectURL(blob);
+```
+
+## Download Video Lesson File
+
+Retrieve notes or materials for a video lesson.
+
+### Endpoint
+
+```http
+GET /media/videolesson-file?videolessonUUID={uuid}&filename={name}
+```
+
+### Parameters
+
+<ParamField query="videolessonUUID" type="string" required>
+  The UUID of the video lesson
+</ParamField>
+
+<ParamField query="filename" type="string" required>
+  The filename in storage
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X GET "https://api.schoolr.it/media/videolesson-file?videolessonUUID=lesson-456&filename=uuid___notes.pdf" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -o lecture-notes.pdf
+```
+
+## Download Profile Image
+
+Retrieve a specific size of a profile image.
+
+### Endpoint
+
+```http
+GET /media/file/profile/{uuid}/{size}.png
+```
+
+### Path Parameters
+
+<ParamField path="uuid" type="string" required>
+  The profile image UUID returned from upload
+</ParamField>
+
+<ParamField path="size" type="string" required>
+  The image size: `base`, `160`, `144`, `70`, `40`, or `35`
+</ParamField>
+
+### Example Request
+
+```bash
+# Get 160px profile image
+curl -X GET "https://api.schoolr.it/media/file/profile/a3b5c7d9-1234-5678-90ab-cdef12345678/160.png" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -o profile-160.png
+```
+
+```html
+<!-- Use directly in HTML -->
+<img src="/media/file/profile/a3b5c7d9-1234-5678-90ab-cdef12345678/160.png" 
+     alt="Profile" 
+     class="avatar-large">
+
+<img src="/media/file/profile/a3b5c7d9-1234-5678-90ab-cdef12345678/40.png" 
+     alt="Profile" 
+     class="avatar-small">
+```
+
+### Available Sizes
+
+<AccordionGroup>
+  <Accordion title="base.png">
+    Original image resized to max 500px width while preserving aspect ratio
+    
+    **Use case:** Full profile view, detailed display
+  </Accordion>
+  
+  <Accordion title="160.png">
+    160px width thumbnail
+    
+    **Use case:** Large avatar in profile cards
+  </Accordion>
+  
+  <Accordion title="144.png">
+    144px width thumbnail
+    
+    **Use case:** Medium avatar in lists
+  </Accordion>
+  
+  <Accordion title="70.png">
+    70px width thumbnail
+    
+    **Use case:** Small avatar in compact views
+  </Accordion>
+  
+  <Accordion title="40.png">
+    40px width thumbnail
+    
+    **Use case:** Mini avatar in chat messages
+  </Accordion>
+  
+  <Accordion title="35.png">
+    35px width thumbnail
+    
+    **Use case:** Tiny avatar in dense lists or badges
+  </Accordion>
+</AccordionGroup>
+
+## List Files in Folder
+
+Retrieve a list of all files in a specific folder.
+
+### Endpoint
+
+```http
+GET /media/file-list?folder={path}
+```
+
+### Parameters
+
+<ParamField query="folder" type="string" required>
+  The folder path to list (e.g., `classroom_files/classroom-uuid/`)
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X GET "https://api.schoolr.it/media/file-list?folder=classroom_files/classroom-123/" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+```javascript
+const response = await fetch(`/media/file-list?folder=classroom_files/${classroomUUID}/`, {
+  headers: { 'Authorization': 'Bearer YOUR_JWT_TOKEN' }
+});
+
+const files = await response.json();
+console.log('Files in classroom:', files);
+```
+
+### Response
+
+```json
+[
+  {
+    "filename": "uuid1___homework.pdf",
+    "filepath": "classroom_files/classroom-123/uuid1___homework.pdf"
+  },
+  {
+    "filename": "uuid2___assignment.docx",
+    "filepath": "classroom_files/classroom-123/uuid2___assignment.docx"
+  }
+]
+```
+
+## Get Video Lesson Notes by Subject
+
+Retrieve all note files for multiple video lessons.
+
+### Endpoint
+
+```http
+GET /media/video-lesson-notes-by-subject?videoLessonUUIDs={uuid1}&videoLessonUUIDs={uuid2}
+```
+
+### Parameters
+
+<ParamField query="videoLessonUUIDs" type="array[string]" required>
+  Array of video lesson UUIDs to retrieve notes for
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X GET "https://api.schoolr.it/media/video-lesson-notes-by-subject?videoLessonUUIDs=lesson-1&videoLessonUUIDs=lesson-2" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+```javascript
+const lessonUUIDs = ['lesson-1', 'lesson-2', 'lesson-3'];
+const params = new URLSearchParams();
+lessonUUIDs.forEach(uuid => params.append('videoLessonUUIDs', uuid));
+
+const response = await fetch(`/media/video-lesson-notes-by-subject?${params}`, {
+  headers: { 'Authorization': 'Bearer YOUR_JWT_TOKEN' }
+});
+
+const notesByLesson = await response.json();
+```
+
+### Response
+
+```json
+[
+  {
+    "videoLessonUUID": "lesson-1",
+    "files": [
+      {
+        "filename": "uuid___notes.pdf",
+        "filepath": "video-lesson-notes/lesson-1/uuid___notes.pdf"
+      }
+    ]
+  },
+  {
+    "videoLessonUUID": "lesson-2",
+    "files": [
+      {
+        "filename": "uuid1___chapter1.pdf",
+        "filepath": "video-lesson-notes/lesson-2/uuid1___chapter1.pdf"
+      },
+      {
+        "filename": "uuid2___chapter2.pdf",
+        "filepath": "video-lesson-notes/lesson-2/uuid2___chapter2.pdf"
+      }
+    ]
+  }
+]
+```
+
+## Delete File
+
+Remove a file from storage.
+
+### Endpoint
+
+```http
+DELETE /media/file?filepath={path}
+```
+
+### Parameters
+
+<ParamField query="filepath" type="string" required>
+  The full path to the file to delete
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X DELETE "https://api.schoolr.it/media/file?filepath=classroom_files/classroom-123/uuid___old-file.pdf" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+```javascript
+const filepath = 'classroom_files/classroom-123/uuid___old-file.pdf';
+
+const response = await fetch(`/media/file?filepath=${encodeURIComponent(filepath)}`, {
+  method: 'DELETE',
+  headers: { 'Authorization': 'Bearer YOUR_JWT_TOKEN' }
+});
+
+if (response.ok) {
+  console.log('File deleted successfully');
+}
+```
+
+### Response
+
+```http
+HTTP/1.1 200 OK
+```
+
+## Delete Video Lesson Notes
+
+Remove specific notes from a video lesson.
+
+### Endpoint
+
+```http
+DELETE /media/delete-video-notes/{videoLessonUUID}/{filename}
+```
+
+### Path Parameters
+
+<ParamField path="videoLessonUUID" type="string" required>
+  The UUID of the video lesson
+</ParamField>
+
+<ParamField path="filename" type="string" required>
+  The filename to delete
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X DELETE "https://api.schoolr.it/media/delete-video-notes/lesson-456/uuid___notes.pdf" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+## Content-Type Detection
+
+The API automatically sets appropriate Content-Type headers:
+
+| Extension | Content-Type |
+|-----------|-------------|
+| `.jpg`, `.jpeg` | `image/jpeg` |
+| `.png` | `image/png` |
+| `.gif` | `image/gif` |
+| `.pdf` | `application/pdf` |
+| `.doc`, `.docx` | `application/msword` |
+| `.zip` | `application/zip` |
+| Others | `application/octet-stream` |
+
+## Streaming Downloads
+
+All downloads use streaming to efficiently handle large files:
+
+```kotlin
+// Server-side streaming (8KB buffer)
+val buffer = ByteArray(8192)
+var bytesRead: Int
+while (input.read(buffer).also { bytesRead = it } != -1) {
+    output.write(buffer, 0, bytesRead)
+}
+```
+
+Benefits:
+- No memory constraints for large files
+- Faster time-to-first-byte
+- Supports partial downloads (range requests)
+
+## Error Handling
+
+<AccordionGroup>
+  <Accordion title="204 No Content">
+    **Cause:** File not found or user doesn't have access
+    
+    **Solution:** Verify the file path and user permissions
+  </Accordion>
+  
+  <Accordion title="404 Not Found">
+    **Cause:** Invalid endpoint or file path
+    
+    **Solution:** Check the URL and file path for typos
+  </Accordion>
+  
+  <Accordion title="500 Internal Server Error">
+    **Cause:** Storage system error or file corruption
+    
+    **Solution:** Retry the request or contact support
+  </Accordion>
+</AccordionGroup>
+
+## Best Practices
+
+<Steps>
+  <Step title="Use Appropriate Size">
+    For profile images, always request the size you need to save bandwidth
+    
+    ```javascript
+    // Good: Request small avatar for list view
+    imgSrc = `/media/file/profile/${uuid}/40.png`;
+    
+    // Bad: Request base image and scale down with CSS
+    imgSrc = `/media/file/profile/${uuid}/base.png`;
+    ```
+  </Step>
+  
+  <Step title="Cache File URLs">
+    Cache file URLs on the client to avoid repeated requests
+    
+    ```javascript
+    const fileCache = new Map();
+    
+    function getFileUrl(filepath) {
+      if (!fileCache.has(filepath)) {
+        fileCache.set(filepath, `/media/file?filepath=${encodeURIComponent(filepath)}`);
+      }
+      return fileCache.get(filepath);
+    }
+    ```
+  </Step>
+  
+  <Step title="Handle Errors Gracefully">
+    Show fallback images or content when files fail to load
+    
+    ```html
+    <img src="/media/file/profile/${uuid}/160.png" 
+         onerror="this.src='/images/default-avatar.png'" 
+         alt="Profile">
+    ```
+  </Step>
+  
+  <Step title="Use Correct Encoding">
+    Always URL-encode file paths with special characters
+    
+    ```javascript
+    const filepath = 'folder/file with spaces.pdf';
+    const url = `/media/file?filepath=${encodeURIComponent(filepath)}`;
+    ```
+  </Step>
+</Steps>

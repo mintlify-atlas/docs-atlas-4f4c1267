@@ -1,0 +1,587 @@
+---
+title: 'Database Migrations'
+description: 'Manage database schema changes with Liquibase'
+---
+
+## Introduction
+
+Schoolor Backend uses **Liquibase** for database schema version control and migrations. Liquibase ensures that database changes are applied consistently across all environments and can be tracked, versioned, and rolled back if needed.
+
+## Overview
+
+- **Tool:** Liquibase 4.22.0
+- **Format:** XML changelogs
+- **Databases:** Two separate PostgreSQL databases
+  - `schoolr` (datamanagement service)
+  - `schoolr-chat` (chat service)
+- **Execution:** Automatic via Kubernetes init jobs in production
+
+## Changelog Structure
+
+### schoolr-datamanagement
+
+Changelogs are organized by date:
+
+```
+apps/schoolr-datamanagement/src/main/resources/db/changelog/
+├── master.xml                    # Master changelog (includes all)
+├── 2023/
+│   ├── 04/
+│   │   ├── 12-01-changelog.xml  # April 12, 2023 - changeset 01
+│   │   ├── 21-01-changelog.xml
+│   │   └── 24-01-changelog.xml
+│   ├── 05/
+│   │   ├── 16-01-changelog.xml
+│   │   └── ...
+├── 2024/
+│   └── ...
+└── 2025/
+    └── ...
+```
+
+### schoolr-chat
+
+Similar structure for the chat database:
+
+```
+apps/schoolr-chat/src/main/resources/db/changelog/
+├── master.xml
+├── 2022/
+├── 2023/
+└── 2024/
+```
+
+## Master Changelog
+
+The `master.xml` file includes all individual changelogs in chronological order:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                      http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.3.xsd">
+
+    <include file="db/changelog/2023/04/12-01-changelog.xml"/>
+    <include file="db/changelog/2023/04/21-01-changelog.xml"/>
+    <include file="db/changelog/2023/04/24-01-changelog.xml"/>
+    <!-- ... more includes ... -->
+    <include file="db/changelog/2025/10/30-01-changelog.xml"/>
+    <include file="db/changelog/2025/10/30-02-changelog.xml"/>
+</databaseChangeLog>
+```
+
+<Note>
+Liquibase processes changelogs in the order they appear in `master.xml`. Never reorder existing entries.
+</Note>
+
+## Example Changelog
+
+A typical changelog creates tables, indexes, and constraints:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                      http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.16.xsd"
+    objectQuotingStrategy="QUOTE_ONLY_RESERVED_WORDS">
+    
+    <changeSet id="1681296904919-1" author="dna19 (generated)">
+        <createTable tableName="account">
+            <column name="id" type="numeric">
+                <constraints nullable="false" primaryKey="true" 
+                           primaryKeyName="pk_account"/>
+            </column>
+            <column name="created_at" type="TIMESTAMP WITHOUT TIME ZONE"/>
+            <column name="updated_at" type="TIMESTAMP WITHOUT TIME ZONE"/>
+            <column defaultValueBoolean="false" name="deleted" type="BOOLEAN"/>
+            <column name="email" type="VARCHAR(255)"/>
+            <column name="phone" type="VARCHAR(255)"/>
+            <column name="first_name" type="VARCHAR(255)"/>
+            <column name="last_name" type="VARCHAR(255)"/>
+            <column name="uuid" type="VARCHAR(255)"/>
+        </createTable>
+    </changeSet>
+    
+    <changeSet id="1681296904919-2" author="dna19 (generated)">
+        <addUniqueConstraint columnNames="email" 
+                           constraintName="uc_account_email" 
+                           tableName="account"/>
+    </changeSet>
+</databaseChangeLog>
+```
+
+## Configuration
+
+### Development Profile (%dev)
+
+Liquibase runs automatically on application startup:
+
+```yaml
+"%dev":
+  quarkus:
+    liquibase:
+      migrate-at-start: true
+      change-log: db/changelog/master.xml
+```
+
+### Production Profile (%prod)
+
+Migrations are disabled in the main application:
+
+```yaml
+"%prod":
+  quarkus:
+    liquibase:
+      migrate-at-start: false
+      change-log: db/changelog/master.xml
+```
+
+Instead, migrations run via **Kubernetes init jobs** before deployment.
+
+## Running Migrations
+
+### Local Development
+
+Migrations run automatically when starting the application in dev mode:
+
+```bash
+./mvnw quarkus:dev -pl apps/schoolr-datamanagement
+```
+
+Liquibase will:
+1. Check the `DATABASECHANGELOG` table for applied changesets
+2. Apply any new changesets from `master.xml`
+3. Record applied changesets with checksums
+
+### Production (Kubernetes)
+
+Migrations run via init jobs during deployment. The init job:
+
+1. Uses the same container image as the main application
+2. Sets special environment variables:
+   ```yaml
+   QUARKUS_LIQUIBASE_ENABLED: "true"
+   QUARKUS_INIT_AND_EXIT: "true"
+   QUARKUS_LIQUIBASE_MIGRATE_AT_START: "true"
+   SCHEDULER_ENABLED: "false"
+   MQTT_ENABLED: "false"
+   ```
+3. Runs Liquibase migrations
+4. Exits after completion
+5. Main deployment waits for job success via init container
+
+### Manual Migration
+
+To run migrations manually against a production database:
+
+<Steps>
+  <Step title="Build the Application">
+    ```bash
+    ./mvnw package -pl apps/schoolr-datamanagement -am -DskipTests
+    ```
+  </Step>
+  
+  <Step title="Set Environment Variables">
+    ```bash
+    export POSTGRES_HOST=your-prod-db.example.com
+    export POSTGRES_DB=schoolr
+    export POSTGRES_USER=schoolr-user
+    export POSTGRES_PASSWORD=your-password
+    export QUARKUS_LIQUIBASE_MIGRATE_AT_START=true
+    export QUARKUS_INIT_AND_EXIT=true
+    export SCHEDULER_ENABLED=false
+    export MQTT_ENABLED=false
+    ```
+  </Step>
+  
+  <Step title="Run Migration">
+    ```bash
+    java -jar apps/schoolr-datamanagement/target/quarkus-app/quarkus-run.jar
+    ```
+    
+    The application will:
+    - Connect to the database
+    - Run pending migrations
+    - Exit with status code 0 on success
+  </Step>
+</Steps>
+
+<Warning>
+Always test migrations on a staging database before running in production.
+</Warning>
+
+## Creating New Migrations
+
+### Naming Convention
+
+Follow the existing pattern:
+
+```
+db/changelog/YYYY/MM/DD-NN-changelog.xml
+```
+
+- `YYYY` - Year (e.g., 2025)
+- `MM` - Month (e.g., 03)
+- `DD` - Day (e.g., 15)
+- `NN` - Sequence number (01, 02, 03...)
+
+### Creating a New Changelog
+
+<Steps>
+  <Step title="Create Changelog File">
+    Create a new file following the naming convention:
+    
+    ```bash
+    # For datamanagement
+    touch apps/schoolr-datamanagement/src/main/resources/db/changelog/2025/03/15-01-changelog.xml
+    ```
+  </Step>
+  
+  <Step title="Add Changelog Content">
+    ```xml
+    <?xml version="1.0" encoding="UTF-8"?>
+    <databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                          http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.16.xsd"
+        objectQuotingStrategy="QUOTE_ONLY_RESERVED_WORDS">
+        
+        <changeSet id="2025-03-15-add-new-feature-table" author="yourname">
+            <createTable tableName="new_feature">
+                <column name="id" type="bigint" autoIncrement="true">
+                    <constraints primaryKey="true" nullable="false"/>
+                </column>
+                <column name="name" type="varchar(255)">
+                    <constraints nullable="false"/>
+                </column>
+                <column name="created_at" type="timestamp">
+                    <constraints nullable="false"/>
+                </column>
+            </createTable>
+        </changeSet>
+        
+        <changeSet id="2025-03-15-add-new-feature-index" author="yourname">
+            <createIndex indexName="idx_new_feature_name" 
+                        tableName="new_feature">
+                <column name="name"/>
+            </createIndex>
+        </changeSet>
+    </databaseChangeLog>
+    ```
+  </Step>
+  
+  <Step title="Update master.xml">
+    Add the include statement to `master.xml` at the end:
+    
+    ```xml
+    <!-- ... existing includes ... -->
+    <include file="db/changelog/2025/03/15-01-changelog.xml"/>
+    ```
+  </Step>
+  
+  <Step title="Test Locally">
+    Run the application in dev mode to test the migration:
+    
+    ```bash
+    ./mvnw quarkus:dev -pl apps/schoolr-datamanagement
+    ```
+    
+    Check logs for successful migration:
+    ```
+    INFO  [liquibase.changelog] db/changelog/2025/03/15-01-changelog.xml::2025-03-15-add-new-feature-table::yourname ran successfully
+    ```
+  </Step>
+</Steps>
+
+## Common Migration Operations
+
+### Add a Column
+
+```xml
+<changeSet id="add-column-example" author="yourname">
+    <addColumn tableName="account">
+        <column name="middle_name" type="varchar(100)">
+            <constraints nullable="true"/>
+        </column>
+    </addColumn>
+</changeSet>
+```
+
+### Modify a Column
+
+```xml
+<changeSet id="modify-column-example" author="yourname">
+    <modifyDataType tableName="account" 
+                   columnName="phone" 
+                   newDataType="varchar(20)"/>
+</changeSet>
+```
+
+### Add an Index
+
+```xml
+<changeSet id="add-index-example" author="yourname">
+    <createIndex indexName="idx_account_email" tableName="account">
+        <column name="email"/>
+    </createIndex>
+</changeSet>
+```
+
+### Add Foreign Key
+
+```xml
+<changeSet id="add-fk-example" author="yourname">
+    <addForeignKeyConstraint 
+        baseTableName="lesson" 
+        baseColumnNames="classroom_id"
+        constraintName="fk_lesson_classroom"
+        referencedTableName="classroom"
+        referencedColumnNames="id"/>
+</changeSet>
+```
+
+### Insert Data
+
+```xml
+<changeSet id="insert-data-example" author="yourname">
+    <insert tableName="subject">
+        <column name="id" valueNumeric="1"/>
+        <column name="name" value="Mathematics"/>
+        <column name="created_at" valueDate="now()"/>
+    </insert>
+</changeSet>
+```
+
+### Create View
+
+```xml
+<changeSet id="create-view-example" author="yourname">
+    <createView viewName="active_students">
+        SELECT a.id, a.email, a.first_name, a.last_name
+        FROM account a
+        INNER JOIN student s ON s.id = a.id
+        WHERE a.deleted = false
+    </createView>
+</changeSet>
+```
+
+## Liquibase Best Practices
+
+<Check>Never modify existing changesets after they've been applied</Check>
+<Check>Use unique, descriptive changeset IDs</Check>
+<Check>Include rollback instructions when possible</Check>
+<Check>Test migrations on a copy of production data</Check>
+<Check>Keep changesets focused (one logical change per changeset)</Check>
+<Check>Use preconditions to prevent unwanted migrations</Check>
+<Check>Add comments to complex migrations</Check>
+<Check>Version control your changelog files</Check>
+
+## Checking Migration Status
+
+### View Applied Changesets
+
+Query the `DATABASECHANGELOG` table:
+
+```sql
+SELECT id, author, filename, dateexecuted, orderexecuted
+FROM DATABASECHANGELOG
+ORDER BY dateexecuted DESC
+LIMIT 20;
+```
+
+### View Pending Changesets
+
+Run Liquibase status command:
+
+```bash
+# Requires Liquibase CLI
+liquibase --url=jdbc:postgresql://localhost:5432/schoolr \
+          --username=schoolr-user \
+          --password=password \
+          --changelog-file=apps/schoolr-datamanagement/src/main/resources/db/changelog/master.xml \
+          status
+```
+
+## Rollback Strategies
+
+### Automatic Rollback
+
+Some operations support automatic rollback:
+
+```xml
+<changeSet id="rollback-example" author="yourname">
+    <createTable tableName="temporary_table">
+        <!-- ... columns ... -->
+    </createTable>
+    <!-- Liquibase automatically generates: dropTable tableName="temporary_table" -->
+</changeSet>
+```
+
+### Manual Rollback
+
+For complex operations, define explicit rollback:
+
+```xml
+<changeSet id="complex-migration" author="yourname">
+    <sql>
+        UPDATE account SET status = 'active' WHERE status = 'pending';
+    </sql>
+    <rollback>
+        UPDATE account SET status = 'pending' WHERE status = 'active';
+    </rollback>
+</changeSet>
+```
+
+### Rolling Back Changes
+
+<Warning>
+Rollback in production should be done with extreme caution and only when necessary.
+</Warning>
+
+Rollback to a specific date:
+
+```bash
+liquibase --url=jdbc:postgresql://localhost:5432/schoolr \
+          --username=schoolr-user \
+          --password=password \
+          --changelog-file=db/changelog/master.xml \
+          rollback-to-date 2025-03-01
+```
+
+Rollback a specific number of changesets:
+
+```bash
+liquibase rollback-count 3
+```
+
+## Handling Migration Failures
+
+### Failed Migration in Kubernetes
+
+If an init job fails:
+
+<Steps>
+  <Step title="Check Job Logs">
+    ```bash
+    kubectl logs job/schoolr-datamanagement-liquibase-init-v1.0.0 -n schoolr-prod
+    ```
+  </Step>
+  
+  <Step title="Identify the Issue">
+    Common causes:
+    - Syntax errors in SQL
+    - Constraint violations
+    - Missing dependencies (e.g., table doesn't exist)
+    - Database connection issues
+  </Step>
+  
+  <Step title="Fix the Changelog">
+    Update the changelog file to fix the issue
+  </Step>
+  
+  <Step title="Clear Failed Changeset">
+    If needed, manually mark the failed changeset:
+    
+    ```sql
+    DELETE FROM DATABASECHANGELOG 
+    WHERE id = 'your-failed-changeset-id';
+    
+    DELETE FROM DATABASECHANGELOGLOCK;
+    ```
+  </Step>
+  
+  <Step title="Redeploy">
+    Deploy again with the fixed changelog:
+    
+    ```bash
+    helm upgrade schoolr-datamanagement . \
+      --set image.tag=v1.0.1 \
+      -f values-prod.yaml \
+      --namespace schoolr-prod
+    ```
+  </Step>
+</Steps>
+
+### Database Lock Issues
+
+If Liquibase reports a lock error:
+
+```sql
+-- Check lock status
+SELECT * FROM DATABASECHANGELOGLOCK;
+
+-- Clear lock (only if migration is not running)
+UPDATE DATABASECHANGELOGLOCK SET locked = false, lockgranted = NULL, lockedby = NULL;
+```
+
+<Warning>
+Only clear locks when you're certain no migration is in progress.
+</Warning>
+
+## Monitoring Migrations
+
+### Init Job Logs
+
+Monitor migration progress in Kubernetes:
+
+```bash
+# Watch job progress
+kubectl get jobs -n schoolr-prod -w
+
+# Stream logs
+kubectl logs -f job/schoolr-datamanagement-liquibase-init-v1.0.0 -n schoolr-prod
+```
+
+Successful migration output:
+
+```
+Liquibase: Update has been successful.
+Quarkus application exiting with status code 0
+```
+
+### Application Logs
+
+In development mode, watch for migration logs:
+
+```
+INFO  [liquibase.lockservice] Successfully acquired change log lock
+INFO  [liquibase.changelog] Reading from DATABASECHANGELOG
+INFO  [liquibase.changelog] db/changelog/2025/03/15-01-changelog.xml::2025-03-15-add-new-feature-table::yourname ran successfully
+INFO  [liquibase.lockservice] Successfully released change log lock
+```
+
+## Multi-Database Considerations
+
+Schoolor Backend manages two separate databases:
+
+| Database | Service | Purpose |
+|----------|---------|----------|
+| `schoolr` | schoolr-datamanagement | Main application data |
+| `schoolr-chat` | schoolr-chat | Chat messages and topics |
+
+Each database has:
+- Its own Liquibase changelogs
+- Its own `DATABASECHANGELOG` table
+- Its own migration history
+- Its own init job in Kubernetes
+
+<Note>
+Changes to one database do not affect the other. Migrations are completely independent.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Kubernetes Deployment" icon="ship" href="/deployment/kubernetes">
+    Return to Kubernetes deployment guide
+  </Card>
+  
+  <Card title="Monitoring" icon="chart-line" href="/deployment/monitoring">
+    Set up logging and monitoring
+  </Card>
+</CardGroup>

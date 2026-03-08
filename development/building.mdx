@@ -1,0 +1,311 @@
+---
+title: Building the Project
+description: Maven commands for building Schoolr Backend libs and applications
+---
+
+Schoolr Backend uses Maven for building. The project structure requires building shared libraries before applications.
+
+## Prerequisites
+
+Before building, ensure you have:
+
+- **JDK 11 or 17** (Java 11 is recommended for compatibility)
+- **Maven 3.8+** (or use the included Maven wrapper `./mvnw`)
+- **Environment Variables**: See [Environment Variables](/development/environment-variables) for configuration
+
+<Note>
+The project uses Maven wrapper (`mvnw`), so you don't need Maven installed system-wide.
+</Note>
+
+## Build Order
+
+<Warning>
+**Important**: Libraries must be built and installed before applications, as apps depend on libs.
+</Warning>
+
+The correct build order is:
+
+1. Install shared libraries to local Maven repository
+2. Build applications
+
+## Building Libraries
+
+### Install All Libraries
+
+From the project root, install all three shared libraries:
+
+```bash
+./mvnw clean install -pl libs/schoolr-libs,libs/schoolr-config,libs/schoolr-persistence-libs -am -DskipTests
+```
+
+**Command breakdown**:
+- `-pl` (--projects) - Specifies which modules to build
+- `-am` (--also-make) - Builds dependencies required by the specified modules
+- `-DskipTests` - Skips running tests (faster for initial builds)
+
+### Install Individual Libraries
+
+Build a specific library:
+
+```bash
+# schoolr-libs only
+./mvnw clean install -pl libs/schoolr-libs -DskipTests
+
+# schoolr-config only
+./mvnw clean install -pl libs/schoolr-config -DskipTests
+
+# schoolr-persistence-libs only
+./mvnw clean install -pl libs/schoolr-persistence-libs -DskipTests
+```
+
+### Verify Library Installation
+
+Libraries are installed to your local Maven repository (typically `~/.m2/repository`):
+
+```bash
+# Check installed versions
+ls ~/.m2/repository/it/simultech/schoolr/schoolr-libs/
+ls ~/.m2/repository/it/simultech/schoolr/schoolr-config/
+ls ~/.m2/repository/it/simultech/schoolr/schoolr-persistence-libs/
+```
+
+You should see:
+- `schoolr-libs/2.2-SNAPSHOT/`
+- `schoolr-config/1.1-SNAPSHOT/`
+- `schoolr-persistence-libs/1.0-SNAPSHOT/`
+
+## Building Applications
+
+### Build All Applications
+
+Build everything (libs + all apps):
+
+```bash
+./mvnw clean install -DskipTests
+```
+
+This builds the entire project tree from the root POM.
+
+### Build Individual Applications
+
+#### schoolr-datamanagement
+
+```bash
+./mvnw package -pl apps/schoolr-datamanagement -am -DskipTests
+```
+
+Output: `apps/schoolr-datamanagement/target/quarkus-app/quarkus-run.jar`
+
+#### schoolr-chat
+
+```bash
+./mvnw package -pl apps/schoolr-chat -am -DskipTests
+```
+
+Output: `apps/schoolr-chat/target/quarkus-app/quarkus-run.jar`
+
+#### schoolr-filemanager
+
+```bash
+./mvnw package -pl apps/schoolr-filemanager -am -DskipTests
+```
+
+Output: `apps/schoolr-filemanager/target/quarkus-app/quarkus-run.jar`
+
+### Build Multiple Applications
+
+Build specific apps together:
+
+```bash
+./mvnw package -pl apps/schoolr-datamanagement,apps/schoolr-chat -am -DskipTests
+```
+
+## Development Mode
+
+Quarkus provides a development mode with hot reload for rapid iteration.
+
+### Run in Dev Mode
+
+<Tabs>
+  <Tab title="datamanagement">
+    ```bash
+    ./mvnw quarkus:dev -pl apps/schoolr-datamanagement
+    ```
+    
+    Starts on port **8080** with:
+    - Live reload on code changes
+    - Dev UI at http://localhost:8080/q/dev
+    - GraphQL UI at http://localhost:8080/q/graphql-ui
+  </Tab>
+  
+  <Tab title="chat">
+    ```bash
+    ./mvnw quarkus:dev -pl apps/schoolr-chat
+    ```
+    
+    Starts on port **9090** with:
+    - Live reload
+    - GraphQL UI at http://localhost:9090/q/graphql-ui
+  </Tab>
+  
+  <Tab title="filemanager">
+    ```bash
+    ./mvnw quarkus:dev -pl apps/schoolr-filemanager
+    ```
+    
+    Starts on port **9099** with:
+    - Live reload
+    - Health checks at http://localhost:9099/q/health
+  </Tab>
+</Tabs>
+
+### Dev Mode from App Directory
+
+You can also run from within the app directory:
+
+```bash
+cd apps/schoolr-datamanagement
+../../mvnw quarkus:dev
+```
+
+### Dev Mode Features
+
+- **Hot Reload**: Code changes trigger automatic recompilation
+- **Dev Services**: Automatic PostgreSQL containers for testing (if Docker available)
+- **Dev UI**: Quarkus Dashboard at `/q/dev`
+- **Configuration**: Uses `%dev` profile in `application.yaml`
+
+## Production Build
+
+Build for production deployment:
+
+```bash
+# Build with production optimizations
+./mvnw clean package -DskipTests
+
+# Run the JAR
+java -jar apps/schoolr-datamanagement/target/quarkus-app/quarkus-run.jar
+```
+
+<Note>
+Production mode uses the `%prod` profile, which requires all environment variables to be set.
+</Note>
+
+## Container Images
+
+Build Docker images with Jib:
+
+```bash
+# Build and push to registry
+./mvnw clean package \
+  -Dquarkus.container-image.build=true \
+  -Dquarkus.container-image.push=true \
+  -DIMAGE_TAG=1.0.0 \
+  -DREGISTRY_USERNAME=your-username \
+  -DREGISTRY_PASSWORD=your-password
+```
+
+Images are pushed to: `gitlab.simultech.it:4567/schoolr2/schoolr-back/<service-name>:<tag>`
+
+### Build Image Locally
+
+```bash
+./mvnw clean package -Dquarkus.container-image.build=true -DskipTests
+```
+
+This creates a local image without pushing to the registry.
+
+## Clean Build
+
+Remove all build artifacts:
+
+```bash
+# Clean entire project
+./mvnw clean
+
+# Clean specific module
+./mvnw clean -pl apps/schoolr-datamanagement
+```
+
+## Troubleshooting
+
+<Accordion title="Error: Could not find artifact schoolr-libs">
+This means the libraries aren't installed in your local Maven repository.
+
+**Solution**: Install the libraries first:
+```bash
+./mvnw clean install -pl libs/schoolr-libs,libs/schoolr-config,libs/schoolr-persistence-libs -am -DskipTests
+```
+</Accordion>
+
+<Accordion title="Java version mismatch errors">
+The project has conflicting Java version settings in the root POM:
+- `maven.compiler.source/target=18`
+- `maven.compiler.release=11` (takes precedence)
+
+**Solution**: Use JDK 11 or JDK 17. If using JDK 18+, you may need to align the POM settings.
+
+```bash
+# Check your Java version
+java -version
+
+# Use JAVA_HOME to specify Java 11
+export JAVA_HOME=/path/to/jdk-11
+./mvnw clean install
+```
+</Accordion>
+
+<Accordion title="Out of memory during build">
+Increase Maven's heap size:
+
+```bash
+export MAVEN_OPTS="-Xmx2048m -XX:MaxPermSize=512m"
+./mvnw clean install
+```
+</Accordion>
+
+<Accordion title="Build hangs during Liquibase migration">
+If building in dev mode, Liquibase tries to connect to PostgreSQL. Either:
+
+1. Ensure PostgreSQL is running, or
+2. Skip migrations during build:
+
+```bash
+./mvnw clean install -Dquarkus.liquibase.migrate-at-start=false
+```
+</Accordion>
+
+<Accordion title="Tests fail with 'Connection refused'">
+Integration tests may try to connect to external services. Skip tests during build:
+
+```bash
+./mvnw clean install -DskipTests
+```
+
+To run tests later, see [Testing](/development/testing).
+</Accordion>
+
+## Quick Reference
+
+| Task | Command |
+|------|--------|
+| Install all libs | `./mvnw install -pl libs/schoolr-libs,libs/schoolr-config,libs/schoolr-persistence-libs -am -DskipTests` |
+| Build everything | `./mvnw clean package -DskipTests` |
+| Dev mode (datamanagement) | `./mvnw quarkus:dev -pl apps/schoolr-datamanagement` |
+| Dev mode (chat) | `./mvnw quarkus:dev -pl apps/schoolr-chat` |
+| Dev mode (filemanager) | `./mvnw quarkus:dev -pl apps/schoolr-filemanager` |
+| Build single app | `./mvnw package -pl apps/schoolr-datamanagement -am -DskipTests` |
+| Clean | `./mvnw clean` |
+| Run tests | `./mvnw test -pl apps/schoolr-datamanagement` |
+| Build container | `./mvnw package -Dquarkus.container-image.build=true` |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Testing" icon="flask" href="/development/testing">
+    Learn how to run unit and integration tests
+  </Card>
+  <Card title="Environment Variables" icon="sliders" href="/development/environment-variables">
+    Configure services with environment variables
+  </Card>
+</CardGroup>

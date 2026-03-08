@@ -1,0 +1,237 @@
+---
+title: Room Management
+description: GraphQL queries and mutations for managing chat rooms
+---
+
+Rooms are the core containers for chat conversations. Each room has a unique UUID and can contain multiple subscribers and messages.
+
+## Room Schema
+
+```graphql
+type Room {
+  id: BigInteger!
+  uuid: String!
+  closed: Boolean!
+  subscribers: [Subscriber!]
+  metadata: [RoomMetadata!]
+  createdAt: String
+  updatedAt: String
+}
+
+type Subscriber {
+  id: BigInteger!
+  subscriberId: String!
+  roomId: BigInteger!
+}
+
+type RoomMetadata {
+  id: BigInteger!
+  name: String!
+  value: String
+  roomId: BigInteger!
+}
+
+type RoomOutDto {
+  id: BigInteger!
+  uuid: String!
+  closed: Boolean!
+}
+```
+
+## Queries
+
+### Get All Rooms
+
+Retrieve all chat rooms accessible to the authenticated user.
+
+```graphql
+query GetRooms {
+  getRooms {
+    id
+    uuid
+    closed
+    subscribers {
+      subscriberId
+    }
+    metadata {
+      name
+      value
+    }
+    createdAt
+    updatedAt
+  }
+}
+```
+
+**Response:**
+
+```json
+{
+  "data": {
+    "getRooms": [
+      {
+        "id": "1",
+        "uuid": "550e8400-e29b-41d4-a716-446655440000",
+        "closed": false,
+        "subscribers": [
+          {
+            "subscriberId": "user-123"
+          },
+          {
+            "subscriberId": "user-456"
+          }
+        ],
+        "metadata": [
+          {
+            "name": "topic",
+            "value": "Math Study Group"
+          }
+        ],
+        "createdAt": "2024-03-15T10:30:00Z",
+        "updatedAt": "2024-03-15T10:30:00Z"
+      }
+    ]
+  }
+}
+```
+
+### Get Room by UUID
+
+Retrieve a specific room by its unique identifier.
+
+```graphql
+query GetRoom($uuid: String!) {
+  getRoomByUUID(uuid: $uuid) {
+    id
+    uuid
+    closed
+    subscribers {
+      subscriberId
+    }
+    metadata {
+      name
+      value
+    }
+  }
+}
+```
+
+**Variables:**
+
+```json
+{
+  "uuid": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**Response:**
+
+```json
+{
+  "data": {
+    "getRoomByUUID": {
+      "id": "1",
+      "uuid": "550e8400-e29b-41d4-a716-446655440000",
+      "closed": false,
+      "subscribers": [
+        {
+          "subscriberId": "user-123"
+        }
+      ],
+      "metadata": [
+        {
+          "name": "topic",
+          "value": "Math Study Group"
+        }
+      ]
+    }
+  }
+}
+```
+
+<Note>
+Returns `null` if the room doesn't exist or the user doesn't have access.
+</Note>
+
+## Mutations
+
+### Create Room
+
+Create a new chat room with a topic.
+
+```graphql
+mutation CreateRoom($topic: String!) {
+  createRoom(topic: $topic) {
+    id
+    uuid
+    closed
+  }
+}
+```
+
+**Variables:**
+
+```json
+{
+  "topic": "Physics Homework Help"
+}
+```
+
+**Response:**
+
+```json
+{
+  "data": {
+    "createRoom": {
+      "id": "2",
+      "uuid": "660e9500-f39c-52e5-b827-557766551111",
+      "closed": false
+    }
+  }
+}
+```
+
+<Info>
+The room UUID is automatically generated and returned in the response. Save this UUID to reference the room in future operations.
+</Info>
+
+## Room States
+
+Rooms can be in one of two states:
+
+<AccordionGroup>
+  <Accordion title="Open Room" icon="lock-open">
+    An active room where messages can be sent and received. The `closed` field is `false`.
+  </Accordion>
+  
+  <Accordion title="Closed Room" icon="lock">
+    A room that has been closed. The `closed` field is `true`. Messages may still be retrievable but new messages cannot be sent.
+  </Accordion>
+</AccordionGroup>
+
+## Room Metadata
+
+Rooms support custom metadata for storing additional information:
+
+- **Topic**: The room's discussion topic or title
+- **Custom Fields**: Any key-value pairs for application-specific data
+
+```graphql
+{
+  metadata {
+    name
+    value
+  }
+}
+```
+
+## Best Practices
+
+<Warning>
+Always validate room UUIDs before performing operations to avoid errors.
+</Warning>
+
+- Cache room data on the client to reduce query frequency
+- Use subscriptions (see [Messages](/api/chat/messages)) to stay updated on room activity
+- Check the `closed` status before allowing users to send messages
+- Store room UUIDs securely for later reference

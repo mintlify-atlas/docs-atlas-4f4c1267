@@ -1,0 +1,293 @@
+---
+title: 'Authentication Overview'
+description: 'Learn how Schoolr Backend handles authentication using SuperTokens'
+---
+
+## Overview
+
+Schoolor Backend uses **SuperTokens** as its authentication provider, supporting multiple authentication recipes including email/password, passwordless (email/phone OTP), and JWT-based authentication.
+
+<Note>
+  SuperTokens is a self-hosted authentication solution that provides secure user management, session handling, and token generation.
+</Note>
+
+## Authentication Architecture
+
+### SuperTokens Integration
+
+The backend integrates with SuperTokens through a dedicated client layer:
+
+- **SuperTokenClient** - Main client for SuperTokens API communication
+- **AuthService** - Business logic layer wrapping SuperTokens operations
+- **IdentityUtil** - Security identity extraction and role-based access control
+
+### Configuration
+
+SuperTokens is configured via `application.yaml`:
+
+```yaml
+supertoken:
+  uri: ${AUTH_CONNECTION_URI}
+  cdi-version: ${SUPERTOKEN_CDI_VERSION:2.20}
+  api-key: ${AUTH_API_KEY}
+```
+
+**Environment Variables:**
+
+<ParamField path="AUTH_CONNECTION_URI" type="string" required>
+  SuperTokens server URI (e.g., `https://st-dev-xxx.aws.supertokens.io`)
+</ParamField>
+
+<ParamField path="SUPERTOKEN_CDI_VERSION" type="string" default="2.20">
+  Core Driver Interface version for SuperTokens compatibility
+</ParamField>
+
+<ParamField path="AUTH_API_KEY" type="string" required>
+  API key for authenticating with SuperTokens server
+</ParamField>
+
+### JWT Configuration
+
+JWT verification is configured through MicroProfile JWT:
+
+```yaml
+mp:
+  jwt:
+    verify:
+      publickey:
+        location: https://supertokens.kube.simultech.it/.well-known/jwks.json
+```
+
+<Warning>
+  In production, ensure the JWKS endpoint is properly secured and uses HTTPS.
+</Warning>
+
+## Authentication Recipes
+
+Schoolor supports multiple authentication recipes:
+
+### 1. Email/Password Authentication
+
+**Recipe ID:** `emailpassword`
+
+Standard email and password authentication flow.
+
+```kotlin
+// Sign up a new user
+val signupData = SignupDto(
+    email = "user@example.com",
+    password = "securePassword123"
+)
+
+val metadata = MetadataUpdateDto(
+    appUserId = userId,
+    first_name = "John",
+    last_name = "Doe",
+    avatar = "https://example.com/avatar.jpg"
+)
+
+val response = authService.saveUser(signupData, metadata)
+```
+
+### 2. Passwordless Authentication
+
+**Recipe ID:** `passwordless`
+
+Supports both email and phone number OTP-based authentication.
+
+#### Email OTP Flow
+
+```kotlin
+// Send verification code via email
+val codeResponse = authService.sendEmailCode(
+    account = account,
+    email = "user@example.com"
+)
+
+// Verify code
+val consumeResponse = authService.consumePhoneCode(
+    data = ConsumeCodeDto(
+        preAuthSessionId = codeResponse.preAuthSessionId,
+        userInputCode = "123456"
+    )
+)
+```
+
+#### Phone OTP Flow
+
+```kotlin
+// Send verification code via SMS
+val codeResponse = authService.sendPhoneCode(
+    account = account,
+    phone = "+1234567890"
+)
+
+// Verify code
+val consumeResponse = authService.consumePhoneCode(
+    data = ConsumeCodeDto(
+        preAuthSessionId = codeResponse.preAuthSessionId,
+        userInputCode = "123456"
+    )
+)
+```
+
+### 3. JWT Authentication
+
+**Recipe ID:** `jwt`
+
+All authenticated requests must include a valid JWT token in the `Authorization` header.
+
+See [JWT Documentation](/api/authentication/jwt) for detailed information on token structure and validation.
+
+## SuperTokens API Endpoints
+
+The backend interacts with the following SuperTokens endpoints:
+
+### User Management
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/recipe/signup` | POST | Create a new user account |
+| `/recipe/user` | GET | Retrieve user by email |
+| `/recipe/user` | PUT | Update user information |
+| `/user/remove` | POST | Delete a user account |
+
+### User Metadata
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/recipe/user/metadata` | GET | Get user metadata |
+| `/recipe/user/metadata` | PUT | Update user metadata |
+
+<Note>
+  User metadata is cached using Quarkus Cache with cache name `user-metadata-cache`
+</Note>
+
+### Passwordless Authentication
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/recipe/signinup/code` | POST | Send OTP code |
+| `/recipe/signinup/code/consume` | POST | Verify OTP code |
+
+### Password Management
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/recipe/user/password/reset/token` | POST | Generate password reset token |
+| `/recipe/user/password/reset` | POST | Reset password using token |
+
+### JWT Keys
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/recipe/jwt/jwks` | GET | Get JSON Web Key Set for token verification |
+
+## Authentication Headers
+
+All SuperTokens API requests require specific headers:
+
+### Common Headers
+
+```
+Content-Type: application/json
+api-key: <SUPERTOKEN_API_KEY>
+```
+
+### Recipe-Specific Headers
+
+For recipe-specific endpoints, add:
+
+```
+rid: <recipe-id>
+```
+
+Where `<recipe-id>` is one of:
+- `emailpassword`
+- `passwordless`
+- `jwt`
+- `dashboard`
+
+## User Metadata Structure
+
+User metadata stored in SuperTokens:
+
+```json
+{
+  "appUserId": 12345,
+  "first_name": "John",
+  "last_name": "Doe",
+  "avatar": "https://example.com/avatar.jpg"
+}
+```
+
+<ParamField path="appUserId" type="BigInteger" required>
+  Internal application user ID linking SuperTokens user to Schoolr account
+</ParamField>
+
+<ParamField path="first_name" type="string">
+  User's first name
+</ParamField>
+
+<ParamField path="last_name" type="string">
+  User's last name
+</ParamField>
+
+<ParamField path="avatar" type="string">
+  URL to user's avatar image
+</ParamField>
+
+## Password Reset Flow
+
+1. **Request Reset Token**
+
+```kotlin
+val success = authService.resetPasswordToken(email = "user@example.com")
+// Sends email with reset link: {baseUrl}/reset-password?token={token}
+```
+
+2. **Reset Password**
+
+```kotlin
+val response = authService.resetPassword(
+    data = ResetPasswordDto(
+        method = "token",
+        token = resetToken,
+        newPassword = "newSecurePassword123"
+    )
+)
+```
+
+<Warning>
+  Password reset tokens are single-use and expire after a set period. Ensure users complete the reset flow promptly.
+</Warning>
+
+## Error Handling
+
+SuperTokens responses include a `status` field:
+
+- `"OK"` - Operation succeeded
+- Other values indicate errors (e.g., `"EMAIL_ALREADY_EXISTS_ERROR"`, `"WRONG_CREDENTIALS_ERROR"`, etc.)
+
+```kotlin
+val response = superTokenClient.saveUser(data)
+
+if (response.status != "OK") {
+    throw Exception("Authentication error: ${response.status}")
+}
+```
+
+## Security Considerations
+
+<Warning>
+  - Always use HTTPS in production environments
+  - Store SuperTokens API keys securely using environment variables
+  - Implement rate limiting on authentication endpoints
+  - Validate JWT tokens on every protected request
+</Warning>
+
+## Related Resources
+
+- [JWT Token Structure and Validation](/api/authentication/jwt)
+- [Identity and Role Management](/api/security/roles)
+- [SuperTokens Documentation](https://supertokens.com/docs)

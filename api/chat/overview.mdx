@@ -1,0 +1,70 @@
+---
+title: Chat API Overview
+description: Real-time chat system with GraphQL queries, mutations, and subscriptions
+---
+
+The Chat API provides a complete real-time messaging solution built with GraphQL. It supports room-based conversations, message management, and real-time subscriptions for instant message delivery.
+
+## Features
+
+- **Room Management**: Create and manage chat rooms with unique identifiers
+- **Message Operations**: Send, retrieve, and filter messages within rooms
+- **Real-time Updates**: Subscribe to message events for instant notifications
+- **File Attachments**: Support for file metadata in messages
+- **Pagination**: Efficient message retrieval with index-based pagination
+
+## Architecture
+
+The Chat API is built on:
+- **GraphQL**: For flexible querying and real-time subscriptions
+- **Mutiny**: For reactive programming with Multi streams
+- **WebSocket**: For subscription-based real-time communication
+
+## Authentication
+
+All chat operations require user authentication. The user's UUID is automatically extracted from the authentication context and used for:
+- Identifying message senders
+- Authorizing room access
+- Tracking user activity
+
+## Getting Started
+
+<CardGroup cols={2}>
+  <Card title="Room Management" icon="users" href="/api/chat/rooms">
+    Create and query chat rooms
+  </Card>
+  <Card title="Messages" icon="message" href="/api/chat/messages">
+    Send and retrieve messages with real-time updates
+  </Card>
+</CardGroup>
+
+## GraphQL Endpoint
+
+```
+POST /graphql
+```
+
+All queries, mutations, and subscriptions are sent to this single endpoint with the operation in the request body.
+
+## Error Handling
+
+The API returns standard GraphQL errors with descriptive messages:
+
+```json
+{
+  "errors": [
+    {
+      "message": "User UUID not provided",
+      "extensions": {
+        "classification": "DataFetchingException"
+      }
+    }
+  ]
+}
+```
+
+Common error scenarios:
+- Missing authentication credentials
+- Invalid room UUID
+- Invalid message data
+- Database connection issues

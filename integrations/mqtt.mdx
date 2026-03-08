@@ -1,0 +1,490 @@
+---
+title: "MQTT Integration"
+description: "Real-time messaging with MQTT for chat and notifications"
+---
+
+# MQTT Message Broker
+
+Schoolr Backend uses MQTT (Message Queuing Telemetry Transport) as a lightweight pub/sub messaging protocol for real-time chat messages, file notifications, and lesson request updates.
+
+## Configuration
+
+MQTT configuration is shared across services:
+
+<ParamField path="MQTT_HOST" type="string" required>
+  MQTT broker hostname or IP address
+  
+  **Default:** `34.154.145.9` (external broker)
+</ParamField>
+
+<ParamField path="MQTT_PORT" type="string" required>
+  MQTT broker port
+  
+  **Default:** `1883`
+</ParamField>
+
+<ParamField path="MQTT_ENABLED" type="boolean">
+  Enable or disable MQTT messaging
+  
+  **Default:** `true` (prod), `false` (dev/test)
+</ParamField>
+
+From `application.yaml:166-170`:
+
+```yaml application.yaml
+mqtt:
+  host: ${MQTT_HOST:34.154.145.9}
+  port: ${MQTT_PORT:1883}
+  connector: smallrye-mqtt
+  enabled: ${MQTT_ENABLED:true}
+```
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="Real-Time Chat" icon="messages">
+    Instant message delivery with WebSocket-like performance
+  </Card>
+  <Card title="Topic-Based Routing" icon="route">
+    Flexible message routing using MQTT topics
+  </Card>
+  <Card title="Quality of Service" icon="shield-check">
+    Guaranteed delivery with QoS levels 0, 1, and 2
+  </Card>
+  <Card title="Shared Subscriptions" icon="share-nodes">
+    Load balance messages across multiple service instances
+  </Card>
+</CardGroup>
+
+## SmallRye Reactive Messaging
+
+Schoolr uses [SmallRye Reactive Messaging](https://smallrye.io/smallrye-reactive-messaging) with the MQTT connector:
+
+```yaml application.yaml
+mp:
+  messaging:
+    outgoing:
+      chat-messages-out:
+        enabled: ${mqtt.enabled}
+        type: ${mqtt.connector}
+        host: ${mqtt.host}
+        port: ${mqtt.port}
+    incoming:
+      chat-messages:
+        enabled: ${mqtt.enabled}
+        type: ${mqtt.connector}
+        connector: ${mqtt.connector}
+        host: ${mqtt.host}
+        port: ${mqtt.port}
+        topic: $share/g/chat-message-notification/#
+```
+
+From `application.yaml:172-187`
+
+## MQTT Topics
+
+Schoolr uses a hierarchical topic structure:
+
+### Chat Messages
+
+```
+chat-message-notification/{room_uuid}
+```
+
+**Example:** `chat-message-notification/550e8400-e29b-41d4-a716-446655440000`
+
+**Payload:**
+
+```json
+{
+  "messageUUID": "660e8400-e29b-41d4-a716-446655440001",
+  "roomUUID": "550e8400-e29b-41d4-a716-446655440000",
+  "senderUUID": "770e8400-e29b-41d4-a716-446655440002",
+  "content": "Hello! When is our next lesson?",
+  "timestamp": "2024-03-08T14:30:00Z",
+  "metadata": {
+    "hasAttachment": false
+  }
+}
+```
+
+### File Notifications
+
+```
+classroom-file-notification/{classroom_uuid}
+```
+
+**Example:** `classroom-file-notification/880e8400-e29b-41d4-a716-446655440003`
+
+**Payload:**
+
+```json
+{
+  "classroomUUID": "880e8400-e29b-41d4-a716-446655440003",
+  "fileName": "Math_Worksheet.pdf",
+  "fileSize": 524288,
+  "uploadedBy": "990e8400-e29b-41d4-a716-446655440004",
+  "uploadedAt": "2024-03-08T14:35:00Z",
+  "filePath": "classroom/880e8400-e29b-41d4-a716-446655440003/Math_Worksheet.pdf"
+}
+```
+
+### Lesson Requests
+
+```
+lesson-request-notification/{tutor_uuid}
+```
+
+**Example:** `lesson-request-notification/aa0e8400-e29b-41d4-a716-446655440005`
+
+**Payload:**
+
+```json
+{
+  "lessonRequestUUID": "bb0e8400-e29b-41d4-a716-446655440006",
+  "studentUUID": "cc0e8400-e29b-41d4-a716-446655440007",
+  "studentName": "Mario Rossi",
+  "subject": "Mathematics",
+  "requestedDate": "2024-03-15",
+  "requestedTime": "10:00",
+  "status": "PENDING"
+}
+```
+
+## Publishing Messages
+
+### Using SmallRye Reactive Messaging
+
+```kotlin ChatMessageProcessor.kt
+import org.eclipse.microprofile.reactive.messaging.Channel
+import org.eclipse.microprofile.reactive.messaging.Emitter
+import javax.enterprise.context.ApplicationScoped
+
+@ApplicationScoped
+class ChatMessageProcessor(
+    @Channel("chat-messages-out")
+    private val chatEmitter: Emitter<ChatMessageOutDto>
+) {
+    fun sendMessage(message: ChatMessageOutDto) {
+        chatEmitter.send(message)
+        logger.info { "Published message to MQTT: ${message.messageUUID}" }
+    }
+}
+```
+
+### Using MQTT Client Directly
+
+```kotlin MqttPublisher.kt
+import org.eclipse.paho.client.mqttv3.MqttClient
+import org.eclipse.paho.client.mqttv3.MqttMessage
+import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence
+
+class MqttPublisher(private val brokerUrl: String) {
+    private val client = MqttClient(
+        brokerUrl,
+        "schoolr-publisher-${UUID.randomUUID()}",
+        MemoryPersistence()
+    )
+    
+    init {
+        client.connect()
+    }
+    
+    fun publish(topic: String, payload: String, qos: Int = 1) {
+        val message = MqttMessage(payload.toByteArray())
+        message.qos = qos
+        message.isRetained = false
+        client.publish(topic, message)
+    }
+}
+```
+
+## Subscribing to Messages
+
+### Using SmallRye Reactive Messaging
+
+```kotlin ChatSubscription.kt
+import org.eclipse.microprofile.reactive.messaging.Incoming
+import javax.enterprise.context.ApplicationScoped
+
+@ApplicationScoped
+class ChatSubscription(
+    private val messageService: MessageService
+) {
+    @Incoming("chat-messages")
+    fun onChatMessage(message: ChatMessageOutDto) {
+        logger.info { "Received chat message: ${message.messageUUID}" }
+        
+        // Process the message (e.g., send WebSocket notification to connected clients)
+        messageService.notifySubscribers(message)
+    }
+}
+```
+
+From `ChatMessageSubscription.kt:28-35`
+
+### Using MQTT Client Directly
+
+```kotlin MqttSubscriber.kt
+import org.eclipse.paho.client.mqttv3.IMqttMessageListener
+import org.eclipse.paho.client.mqttv3.MqttClient
+
+class MqttSubscriber(private val brokerUrl: String) {
+    private val client = MqttClient(
+        brokerUrl,
+        "schoolr-subscriber-${UUID.randomUUID()}",
+        MemoryPersistence()
+    )
+    
+    init {
+        client.connect()
+    }
+    
+    fun subscribe(topic: String, qos: Int = 1, listener: (String) -> Unit) {
+        client.subscribe(topic, qos, IMqttMessageListener { _, message ->
+            val payload = String(message.payload)
+            listener(payload)
+        })
+    }
+}
+```
+
+## Shared Subscriptions
+
+For load balancing across multiple service instances, use shared subscriptions:
+
+```
+$share/{group_name}/{topic}
+```
+
+**Example:** `$share/g/chat-message-notification/#`
+
+- `$share`: Indicates a shared subscription
+- `g`: Group name (all instances in group "g" share the load)
+- `chat-message-notification/#`: Topic filter (# is a multi-level wildcard)
+
+With shared subscriptions, each message is delivered to only one subscriber in the group, enabling horizontal scaling.
+
+## Quality of Service (QoS)
+
+MQTT supports three QoS levels:
+
+| QoS | Guarantee | Use Case |
+|-----|-----------|----------|
+| 0 | At most once (fire and forget) | Non-critical notifications |
+| 1 | At least once (acknowledged delivery) | Chat messages, file notifications |
+| 2 | Exactly once (guaranteed delivery) | Payment confirmations, critical updates |
+
+**Schoolr uses QoS 1** for most messages (chat, files) to ensure delivery while maintaining performance.
+
+## Local MQTT Broker Setup
+
+For local development, run an MQTT broker with Docker:
+
+### Option 1: Eclipse Mosquitto
+
+```bash
+docker run -d \
+  --name schoolr-mqtt \
+  -p 1883:1883 \
+  -p 9001:9001 \
+  eclipse-mosquitto:2
+```
+
+### Option 2: EMQX (with Web UI)
+
+```bash
+docker run -d \
+  --name schoolr-emqx \
+  -p 1883:1883 \
+  -p 18083:18083 \
+  emqx/emqx:latest
+```
+
+Access EMQX Dashboard at http://localhost:18083
+- **Username:** `admin`
+- **Password:** `public`
+
+### Option 3: Docker Compose
+
+```yaml docker-compose.yml
+services:
+  mqtt:
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
+    healthcheck:
+      test: ["CMD", "mosquitto_sub", "-t", "test", "-C", "1", "-i", "test", "-W", "2"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+```
+
+**mosquitto.conf:**
+
+```conf mosquitto.conf
+listener 1883
+allow_anonymous true
+
+listener 9001
+protocol websockets
+```
+
+Update your `.env`:
+
+```bash .env
+MQTT_HOST=localhost
+MQTT_PORT=1883
+MQTT_ENABLED=true
+```
+
+## Testing MQTT
+
+### Using mosquitto_pub and mosquitto_sub
+
+Install Mosquitto clients:
+
+```bash
+# macOS
+brew install mosquitto
+
+# Ubuntu/Debian
+sudo apt-get install mosquitto-clients
+```
+
+Subscribe to a topic:
+
+```bash
+mosquitto_sub -h localhost -p 1883 -t "chat-message-notification/#" -v
+```
+
+Publish a test message:
+
+```bash
+mosquitto_pub -h localhost -p 1883 \
+  -t "chat-message-notification/550e8400-e29b-41d4-a716-446655440000" \
+  -m '{"messageUUID":"test","content":"Test message"}'
+```
+
+### Using MQTT Explorer GUI
+
+Download [MQTT Explorer](http://mqtt-explorer.com/) for visual testing:
+
+1. Connect to `localhost:1883`
+2. Subscribe to `#` (all topics)
+3. Publish test messages
+4. View message history and payload
+
+## Best Practices
+
+<Check>Use QoS 1 for important messages (chat, notifications)</Check>
+<Check>Keep topics hierarchical and descriptive (e.g., `entity-type/entity-id`)</Check>
+<Check>Use shared subscriptions for load balancing</Check>
+<Check>Set appropriate message retention policies</Check>
+<Check>Monitor broker metrics (connections, message rate, queue depth)</Check>
+
+<Warning>
+  MQTT messages are not encrypted by default. Use TLS (port 8883) in production.
+</Warning>
+
+## Production Deployment
+
+### Enable TLS/SSL
+
+For production, use encrypted MQTT connections:
+
+```yaml application.yaml
+mqtt:
+  host: ${MQTT_HOST:mqtt.schoolr.net}
+  port: ${MQTT_PORT:8883}
+  ssl: true
+  ssl-config:
+    truststore: /path/to/truststore.jks
+    truststore-password: ${TRUSTSTORE_PASSWORD}
+```
+
+### Authentication
+
+Enable username/password authentication:
+
+```yaml application.yaml
+mqtt:
+  host: ${MQTT_HOST}
+  port: ${MQTT_PORT}
+  username: ${MQTT_USERNAME}
+  password: ${MQTT_PASSWORD}
+```
+
+### High Availability
+
+Deploy a clustered MQTT broker (EMQX cluster recommended):
+
+```bash
+# Node 1
+docker run -d --name emqx1 \
+  -e EMQX_NAME=emqx \
+  -e EMQX_CLUSTER__DISCOVERY_STRATEGY=static \
+  -e EMQX_CLUSTER__STATIC__SEEDS='emqx@node1.emqx.io,emqx@node2.emqx.io' \
+  emqx/emqx:latest
+
+# Node 2
+docker run -d --name emqx2 \
+  -e EMQX_NAME=emqx \
+  -e EMQX_CLUSTER__DISCOVERY_STRATEGY=static \
+  -e EMQX_CLUSTER__STATIC__SEEDS='emqx@node1.emqx.io,emqx@node2.emqx.io' \
+  emqx/emqx:latest
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Cannot connect to MQTT broker">
+    **Cause:** Broker not running, incorrect host/port, or firewall blocking
+    
+    **Solution:**
+    - Check broker is running: `docker ps | grep mqtt`
+    - Verify `MQTT_HOST` and `MQTT_PORT` are correct
+    - Test connection: `mosquitto_pub -h localhost -p 1883 -t test -m test`
+    - Check firewall allows port 1883
+  </Accordion>
+  
+  <Accordion title="Messages not received">
+    **Cause:** Wrong topic, not subscribed, or QoS mismatch
+    
+    **Solution:**
+    - Verify topic name matches exactly (case-sensitive)
+    - Check subscription is active (no errors in logs)
+    - Ensure QoS level is appropriate (use QoS 1 for reliability)
+    - Test with `mosquitto_sub` to verify broker is receiving messages
+  </Accordion>
+  
+  <Accordion title="High message latency">
+    **Cause:** Broker overload, network issues, or large message size
+    
+    **Solution:**
+    - Check broker CPU/memory usage
+    - Monitor message queue depth
+    - Reduce message size (use references instead of embedding large data)
+    - Scale broker horizontally (add more nodes)
+  </Accordion>
+</AccordionGroup>
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="Chat Service" icon="comments" href="/services/chat">
+    Real-time chat implementation with MQTT
+  </Card>
+  <Card title="Chat API" icon="message" href="/api/chat/overview">
+    GraphQL subscriptions for chat messages
+  </Card>
+  <Card title="File Manager" icon="folder" href="/services/filemanager">
+    File upload notifications via MQTT
+  </Card>
+  <Card title="Environment Variables" icon="gear" href="/development/environment-variables">
+    MQTT configuration reference
+  </Card>
+</CardGroup>

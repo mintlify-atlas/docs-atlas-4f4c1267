@@ -1,0 +1,442 @@
+---
+title: 'Lesson Queries'
+description: 'GraphQL queries for retrieving lesson information'
+---
+
+## lessons
+
+Retrieves a paginated list of lessons with optional filtering.
+
+**Source**: `LessonResource.kt:57`
+
+### Parameters
+
+<ParamField path="pagination" type="PaginationParams" default="{}">
+  Pagination settings with `page` and `size` fields
+</ParamField>
+
+<ParamField path="lessonStatus" type="LessonStatus">
+  Filter by lesson status: `PENDING`, `CONFIRMED`, `CANCELED`, `REJECTED`, `COMPLETED`
+</ParamField>
+
+<ParamField path="lessonType" type="ClassroomType">
+  Filter by classroom type: `INDIVIDUAL`, `GROUP`, `HOME`
+</ParamField>
+
+<ParamField path="paymentMode" type="PaymentMode">
+  Filter by payment mode: `FREE`, `PAID`, `SINGLE`
+</ParamField>
+
+<ParamField path="startDate" type="String">
+  Filter lessons starting from this date (ISO format)
+</ParamField>
+
+<ParamField path="endDate" type="String">
+  Filter lessons up to this date (ISO format)
+</ParamField>
+
+<ParamField path="search" type="String">
+  Search term for filtering lessons
+</ParamField>
+
+### Returns
+
+`List<Lesson>` - Array of lesson objects
+
+### Example
+
+```graphql
+query GetLessons {
+  lessons(
+    pagination: { page: 0, size: 20 }
+    lessonStatus: PENDING
+    paymentMode: PAID
+    startDate: "2026-03-01"
+    endDate: "2026-03-31"
+  ) {
+    id
+    uuid
+    lessonDate
+    lessonTime
+    status
+    minutes
+    subject {
+      name
+    }
+    classroom {
+      signature
+    }
+  }
+}
+```
+
+---
+
+## countLessons
+
+Counts the total number of lessons matching the given criteria.
+
+**Source**: `LessonResource.kt:93`
+
+### Parameters
+
+<ParamField path="lessonStatus" type="LessonStatus">
+  Filter by lesson status
+</ParamField>
+
+<ParamField path="startDate" type="String">
+  Count lessons starting from this date
+</ParamField>
+
+<ParamField path="endDate" type="String">
+  Count lessons up to this date
+</ParamField>
+
+### Returns
+
+`Long` - Total count of matching lessons
+
+### Example
+
+```graphql
+query CountPendingLessons {
+  countLessons(
+    lessonStatus: PENDING
+    startDate: "2026-03-01"
+  )
+}
+```
+
+---
+
+## lessonByUUID
+
+Retrieves a single lesson by its UUID.
+
+**Source**: `LessonResource.kt:152`
+
+### Parameters
+
+<ParamField path="lessonUUID" type="UUID" required>
+  The unique identifier of the lesson
+</ParamField>
+
+### Returns
+
+`Lesson` - The lesson object or null if not found
+
+### Example
+
+```graphql
+query GetLessonDetails {
+  lessonByUUID(lessonUUID: "123e4567-e89b-12d3-a456-426614174000") {
+    id
+    uuid
+    lessonDate
+    lessonTime
+    status
+    minutes
+    subject {
+      id
+      name
+    }
+    classroom {
+      signature
+      type
+    }
+    tutor {
+      id
+      firstName
+      lastName
+    }
+    students {
+      id
+      firstName
+      lastName
+    }
+  }
+}
+```
+
+---
+
+## checkLessonTime
+
+Validates if a lesson time slot is available for a given classroom.
+
+**Source**: `LessonResource.kt:38`
+
+### Parameters
+
+<ParamField path="lessonDate" type="String" required>
+  The lesson date in ISO format (YYYY-MM-DD)
+</ParamField>
+
+<ParamField path="lessonTime" type="String" required>
+  The lesson start time in ISO format (HH:mm:ss)
+</ParamField>
+
+<ParamField path="classroomSignature" type="String" required>
+  The unique signature of the classroom
+</ParamField>
+
+<ParamField path="minutes" type="Long" default="0">
+  Duration of the lesson in minutes
+</ParamField>
+
+<ParamField path="currentLessonId" type="BigInteger">
+  ID of current lesson (used when updating existing lesson)
+</ParamField>
+
+### Returns
+
+`List<LocalDateTime>` - Array of conflicting time slots, empty if available
+
+### Example
+
+```graphql
+query CheckAvailability {
+  checkLessonTime(
+    lessonDate: "2026-03-15"
+    lessonTime: "14:00:00"
+    classroomSignature: "classroom-sig-123"
+    minutes: 60
+  )
+}
+```
+
+---
+
+## lessonRoom
+
+Creates or retrieves a virtual lesson room for conducting the lesson.
+
+**Source**: `LessonResource.kt:109`
+
+### Parameters
+
+<ParamField path="lessonUUID" type="UUID" required>
+  The UUID of the lesson
+</ParamField>
+
+<ParamField path="disableCamera" type="Boolean">
+  Whether to disable camera access in the lesson room
+</ParamField>
+
+### Returns
+
+`LessonRoomDto` - Virtual classroom access details
+
+### Example
+
+```graphql
+query JoinLessonRoom {
+  lessonRoom(
+    lessonUUID: "123e4567-e89b-12d3-a456-426614174000"
+    disableCamera: false
+  ) {
+    roomId
+    accessToken
+    participantName
+    expiresAt
+  }
+}
+```
+
+---
+
+## retrieveLessonRoom
+
+Retrieves an existing lesson room without creating a new one.
+
+**Source**: `LessonResource.kt:116`
+
+**Authentication**: Required
+
+### Parameters
+
+<ParamField path="lessonUUID" type="UUID" required>
+  The UUID of the lesson
+</ParamField>
+
+### Returns
+
+Lesson room details if the room exists
+
+### Example
+
+```graphql
+query GetExistingLessonRoom {
+  retrieveLessonRoom(lessonUUID: "123e4567-e89b-12d3-a456-426614174000") {
+    roomId
+    accessToken
+    status
+  }
+}
+```
+
+---
+
+## initBookLesson
+
+Initializes the lesson booking process and retrieves all necessary information for booking.
+
+**Source**: `BookLessonResource.kt:31`
+
+### Parameters
+
+<ParamField path="data" type="InitBookLessonDto" required>
+  Initialization data containing:
+  - `lessonResponseUUID` - UUID from lesson request response
+  - `classRoomSig` - Classroom signature
+  - `lessonUuid` - UUID of existing lesson (optional)
+</ParamField>
+
+### Returns
+
+`InitBookLessonOutDto` - Complete booking initialization data including:
+- Lesson type and rates
+- Available vouchers and packets
+- Student and tutor information
+- Payment transaction details
+
+### Example
+
+```graphql
+query InitializeBooking {
+  initBookLesson(
+    data: {
+      lessonResponseUUID: "123e4567-e89b-12d3-a456-426614174000"
+      classRoomSig: "classroom-sig-123"
+    }
+  ) {
+    lessonType
+    freeLesson
+    hasVouchers
+    voucherHours
+    hasPackets
+    packetHours
+    lessonRate {
+      id
+      hourlyRate
+      currency
+    }
+    tutor {
+      id
+      firstName
+      lastName
+    }
+    student {
+      id
+      firstName
+      lastName
+    }
+    isFirstBookLesson
+    isHomeLesson
+  }
+}
+```
+
+---
+
+## bookLessonRecap
+
+Retrieves a summary of a booked lesson including payment status.
+
+**Source**: `BookLessonResource.kt:42`
+
+### Parameters
+
+<ParamField path="transactionUuid" type="UUID" required>
+  The UUID of the payment transaction
+</ParamField>
+
+### Returns
+
+`BookLessonRecapOutDto` - Booking recap with payment and lesson details
+
+### Example
+
+```graphql
+query GetBookingRecap {
+  bookLessonRecap(transactionUuid: "123e4567-e89b-12d3-a456-426614174000") {
+    transactionUuid
+    paymentUuid
+    totalAmount
+    countTransactions
+    transactionAmount
+    transactionPaid
+    paymentCompleted
+    lesson {
+      id
+      uuid
+      lessonDate
+      lessonTime
+      status
+    }
+  }
+}
+```
+
+---
+
+## transferLessonAmountToTutor
+
+Initiates a transfer of the lesson payment to the tutor.
+
+**Source**: `LessonResource.kt:158`
+
+### Parameters
+
+<ParamField path="lessonUUID" type="UUID" required>
+  The UUID of the lesson
+</ParamField>
+
+### Returns
+
+`Lesson` - The updated lesson object
+
+### Example
+
+```graphql
+query TransferPayment {
+  transferLessonAmountToTutor(lessonUUID: "123e4567-e89b-12d3-a456-426614174000") {
+    id
+    uuid
+    status
+  }
+}
+```
+
+---
+
+## lessonsToBeTransferredToTutor
+
+Retrieves all lessons where payment needs to be transferred to the tutor.
+
+**Source**: `LessonResource.kt:170`
+
+### Returns
+
+`List<Lesson>` - Array of lessons pending tutor payment transfer
+
+### Example
+
+```graphql
+query GetPendingTransfers {
+  lessonsToBeTransferredToTutor {
+    id
+    uuid
+    lessonDate
+    lessonTime
+    tutor {
+      id
+      firstName
+      lastName
+    }
+    subject {
+      name
+    }
+  }
+}
+```

@@ -1,0 +1,320 @@
+---
+title: Local Setup
+description: Set up PostgreSQL, MinIO, and MQTT infrastructure for local development
+---
+
+This guide covers setting up the required infrastructure services for running Schoolr Backend locally.
+
+## PostgreSQL Setup
+
+Schoolor Backend requires **two separate PostgreSQL databases**:
+
+- `schoolr` - Used by **schoolr-datamanagement**
+- `schoolr-chat` - Used by **schoolr-chat**
+
+### Option A: Local PostgreSQL Installation
+
+If you have PostgreSQL installed locally, create the databases and user:
+
+<Steps>
+  <Step title="Create Database User">
+    Create a user for Schoolr services:
+
+    ```bash
+    psql -U postgres -c "CREATE USER \"schoolr-user\" WITH PASSWORD 'password';"
+    ```
+  </Step>
+
+  <Step title="Create Databases">
+    Create both required databases:
+
+    ```bash
+    # Database for datamanagement service
+    psql -U postgres -c "CREATE DATABASE schoolr OWNER \"schoolr-user\";"
+
+    # Database for chat service
+    psql -U postgres -c "CREATE DATABASE \"schoolr-chat\" OWNER \"schoolr-user\";"
+    ```
+  </Step>
+
+  <Step title="Verify Connection">
+    Test the database connections:
+
+    ```bash
+    # Test datamanagement database (port 5432)
+    PGPASSWORD=password psql -h localhost -p 5432 -U schoolr-user -d schoolr -c "SELECT 1"
+
+    # Test chat database (port 5432)
+    PGPASSWORD=password psql -h localhost -p 5432 -U schoolr-user -d schoolr-chat -c "SELECT 1"
+    ```
+
+    If both commands return a row with `1`, the connections are working.
+  </Step>
+</Steps>
+
+### Option B: PostgreSQL with Docker (Recommended)
+
+<Info>
+  Using Docker containers allows for isolated database instances and easier cleanup.
+</Info>
+
+<Steps>
+  <Step title="Start Datamanagement Database">
+    Run PostgreSQL container for the main database:
+
+    ```bash
+    docker run -d --name schoolr-postgres \
+      -e POSTGRES_USER=schoolr-user \
+      -e POSTGRES_PASSWORD=password \
+      -e POSTGRES_DB=schoolr \
+      -p 5432:5432 \
+      postgres:15
+    ```
+  </Step>
+
+  <Step title="Start Chat Database">
+    Run a separate PostgreSQL container for chat:
+
+    ```bash
+    docker run -d --name schoolr-postgres-chat \
+      -e POSTGRES_USER=schoolr-user \
+      -e POSTGRES_PASSWORD=password \
+      -e POSTGRES_DB=schoolr-chat \
+      -p 5433:5432 \
+      postgres:15
+    ```
+
+    <Note>
+      The chat database runs on **port 5433** (host) → **5432** (container) to avoid conflicts.
+    </Note>
+  </Step>
+
+  <Step title="Verify Containers">
+    Check that both containers are running:
+
+    ```bash
+    docker ps | grep schoolr-postgres
+    ```
+
+    Test connections:
+
+    ```bash
+    # Test datamanagement database (port 5432)
+    PGPASSWORD=password psql -h localhost -p 5432 -U schoolr-user -d schoolr -c "SELECT 1"
+
+    # Test chat database (port 5433)
+    PGPASSWORD=password psql -h localhost -p 5433 -U schoolr-user -d schoolr-chat -c "SELECT 1"
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+  If using the chat database on port 5433, you'll need to set `POSTGRES_PORT=5433` in your `.env` file for the chat service.
+</Warning>
+
+#### Managing Docker Containers
+
+<CodeGroup>
+```bash Start Existing Containers
+# Start containers if they already exist
+docker start schoolr-postgres
+docker start schoolr-postgres-chat
+```
+
+```bash Stop Containers
+# Stop running containers
+docker stop schoolr-postgres
+docker stop schoolr-postgres-chat
+```
+
+```bash Remove and Recreate
+# Remove containers (data will be lost)
+docker rm -f schoolr-postgres
+docker rm -f schoolr-postgres-chat
+
+# Then re-run the docker run commands
+```
+</CodeGroup>
+
+## MinIO Setup (File Manager Only)
+
+<Info>
+  MinIO is only required if you plan to run **schoolr-filemanager**. You can skip this for basic datamanagement and chat development.
+</Info>
+
+<Steps>
+  <Step title="Start MinIO Container">
+    Run MinIO object storage server:
+
+    ```bash
+    docker run -d --name schoolr-minio \
+      -p 9000:9000 \
+      -e MINIO_ROOT_USER=minioadmin \
+      -e MINIO_ROOT_PASSWORD=minioadmin \
+      minio/minio server /data
+    ```
+  </Step>
+
+  <Step title="Create Bucket">
+    Access the MinIO console at [http://localhost:9000](http://localhost:9000) and:
+
+    1. Log in with username `minioadmin` and password `minioadmin`
+    2. Create a bucket named `schoolr`
+
+    Alternatively, use the MinIO client (`mc`):
+
+    ```bash
+    # Configure mc
+    mc alias set local http://localhost:9000 minioadmin minioadmin
+
+    # Create bucket
+    mc mb local/schoolr
+    ```
+  </Step>
+</Steps>
+
+## MQTT Setup (Optional)
+
+<Info>
+  MQTT is used for real-time messaging between services. In development, you can use the default external broker or run a local instance.
+</Info>
+
+### Option A: Use Default External Broker
+
+The default configuration points to `34.154.145.9:1883`. If this broker is accessible, no setup is needed.
+
+### Option B: Local MQTT Broker
+
+<Steps>
+  <Step title="Start Mosquitto Container">
+    Run a local Eclipse Mosquitto MQTT broker:
+
+    ```bash
+    docker run -d --name schoolr-mqtt \
+      -p 1883:1883 \
+      eclipse-mosquitto:2
+    ```
+  </Step>
+
+  <Step title="Configure Environment">
+    Set these environment variables in your `.env` file:
+
+    ```bash
+    MQTT_HOST=localhost
+    MQTT_PORT=1883
+    MQTT_ENABLED=true
+    ```
+  </Step>
+</Steps>
+
+### Option C: Disable MQTT
+
+For local development without real-time features:
+
+```bash .env
+MQTT_ENABLED=false
+```
+
+## Docker Compose (Recommended)
+
+<Tip>
+  Using Docker Compose simplifies managing all infrastructure services together.
+</Tip>
+
+Create a `docker-compose.dev.yml` file in your project root:
+
+```yaml docker-compose.dev.yml
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: schoolr-user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: schoolr
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  postgres-chat:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: schoolr-user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: schoolr-chat
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_chat_data:/var/lib/postgresql/data
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  mqtt:
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"
+
+volumes:
+  postgres_data:
+  postgres_chat_data:
+  minio_data:
+```
+
+### Using Docker Compose
+
+<CodeGroup>
+```bash Start All Services
+docker compose -f docker-compose.dev.yml up -d
+```
+
+```bash Stop All Services
+docker compose -f docker-compose.dev.yml down
+```
+
+```bash View Logs
+docker compose -f docker-compose.dev.yml logs -f
+```
+
+```bash Remove All Data
+docker compose -f docker-compose.dev.yml down -v
+```
+</CodeGroup>
+
+## Verification Checklist
+
+Before proceeding to configuration, verify:
+
+<Accordion title="PostgreSQL">
+  - [ ] Both databases (`schoolr` and `schoolr-chat`) are created
+  - [ ] User `schoolr-user` has access to both databases
+  - [ ] Connection tests succeed for both databases
+  - [ ] Note the ports: 5432 for datamanagement, 5433 for chat (if using separate containers)
+</Accordion>
+
+<Accordion title="MinIO (Optional)">
+  - [ ] MinIO container is running
+  - [ ] Console accessible at http://localhost:9000
+  - [ ] Bucket `schoolr` is created
+</Accordion>
+
+<Accordion title="MQTT (Optional)">
+  - [ ] MQTT broker is running (local or accessible external)
+  - [ ] Port 1883 is accessible
+  - [ ] OR MQTT is disabled in configuration
+</Accordion>
+
+## Next Steps
+
+<Card title="Configuration" icon="gear" href="/getting-started/configuration">
+  Configure environment variables and application settings
+</Card>

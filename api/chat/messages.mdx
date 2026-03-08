@@ -1,0 +1,466 @@
+---
+title: Messages
+description: GraphQL queries, mutations, and subscriptions for chat messages
+---
+
+Messages are the core communication units within chat rooms. They support text content, file attachments via metadata, and real-time delivery through subscriptions.
+
+## Message Schema
+
+```graphql
+type Message {
+  id: BigInteger!
+  uuid: UUID
+  text: String
+  roomId: BigInteger!
+  senderUUID: String
+  metadata: [MessageMetadata!]
+  room: Room
+  createdAt: String
+  updatedAt: String
+}
+
+type MessageMetadata {
+  id: BigInteger!
+  name: String
+  value: String
+  messageId: BigInteger
+}
+
+type ChatMessageOutDto {
+  id: BigInteger
+  text: String
+  roomId: BigInteger
+  senderUUID: String
+  createdAt: String
+  metadata: [MessageMetadata!]
+}
+
+input MessageDto {
+  roomUUID: String
+  text: String
+  senderUUID: String
+  metadata: [MessageMetadataDto!]
+  uuid: UUID
+}
+
+input MessageMetadataDto {
+  name: String
+  value: String
+}
+```
+
+## Queries
+
+### Get Messages
+
+Retrieve messages from a specific room with pagination support.
+
+```graphql
+query GetMessages(
+  $roomUuid: String!
+  $index: Int
+  $items: Int
+) {
+  getMessages(
+    room_uuid: $roomUuid
+    index: $index
+    items: $items
+  ) {
+    id
+    uuid
+    text
+    senderUUID
+    roomId
+    metadata {
+      name
+      value
+    }
+    createdAt
+  }
+}
+```
+
+**Variables:**
+
+```json
+{
+  "roomUuid": "550e8400-e29b-41d4-a716-446655440000",
+  "index": 0,
+  "items": 20
+}
+```
+
+**Response:**
+
+```json
+{
+  "data": {
+    "getMessages": [
+      {
+        "id": "101",
+        "uuid": "770e9600-g40d-63f6-c938-668877662222",
+        "text": "Hello, everyone!",
+        "senderUUID": "user-123",
+        "roomId": "1",
+        "metadata": [],
+        "createdAt": "2024-03-15T10:35:00Z"
+      },
+      {
+        "id": "102",
+        "uuid": "880f0700-h51e-74g7-d049-779988773333",
+        "text": "Check out this file",
+        "senderUUID": "user-456",
+        "roomId": "1",
+        "metadata": [
+          {
+            "name": "image_path",
+            "value": "classroom-file?classroomUUID=room-uuid&filename=document.pdf"
+          }
+        ],
+        "createdAt": "2024-03-15T10:36:00Z"
+      }
+    ]
+  }
+}
+```
+
+<Info>
+Messages are returned in descending order by creation date (newest first).
+</Info>
+
+**Parameters:**
+
+<ParamField path="room_uuid" type="string" required>
+  The UUID of the room to retrieve messages from
+</ParamField>
+
+<ParamField path="index" type="integer" default="0">
+  Starting index for pagination (0-based)
+</ParamField>
+
+<ParamField path="items" type="integer" default="0">
+  Number of messages to retrieve (0 = all messages)
+</ParamField>
+
+### Get Messages with Files
+
+Retrieve only messages that contain file attachments.
+
+```graphql
+query GetMessagesWithFiles(
+  $roomUuid: String!
+  $index: Int
+  $items: Int
+) {
+  getMessagesWithFiles(
+    room_uuid: $roomUuid
+    index: $index
+    items: $items
+  ) {
+    id
+    text
+    senderUUID
+    metadata {
+      name
+      value
+    }
+    createdAt
+  }
+}
+```
+
+**Variables:**
+
+```json
+{
+  "roomUuid": "550e8400-e29b-41d4-a716-446655440000",
+  "index": 0,
+  "items": 10
+}
+```
+
+<Note>
+This query filters messages that have metadata with the name `image_path`, which indicates a file attachment.
+</Note>
+
+### Count Messages with Files
+
+Get the total count of messages with file attachments in a room.
+
+```graphql
+query CountMessagesWithFiles($roomUuid: String!) {
+  countMessagesWithFiles(room_uuid: $roomUuid)
+}
+```
+
+**Response:**
+
+```json
+{
+  "data": {
+    "countMessagesWithFiles": 15
+  }
+}
+```
+
+## Mutations
+
+### Create Message
+
+Send a new message to a chat room.
+
+```graphql
+mutation CreateMessage($messageInput: MessageDto!) {
+  createMessage(messageInput: $messageInput) {
+    id
+    text
+    roomId
+    senderUUID
+    createdAt
+    metadata {
+      name
+      value
+    }
+  }
+}
+```
+
+**Variables:**
+
+```json
+{
+  "messageInput": {
+    "roomUUID": "550e8400-e29b-41d4-a716-446655440000",
+    "text": "This is my message",
+    "metadata": []
+  }
+}
+```
+
+**Response:**
+
+```json
+{
+  "data": {
+    "createMessage": {
+      "id": "103",
+      "text": "This is my message",
+      "roomId": "1",
+      "senderUUID": "user-123",
+      "createdAt": "2024-03-15T10:40:00Z",
+      "metadata": []
+    }
+  }
+}
+```
+
+<Warning>
+The `senderUUID` is automatically set from the authenticated user's context. Do not manually specify it in the input.
+</Warning>
+
+### Create Message with File
+
+Send a message with a file attachment by including file metadata.
+
+```json
+{
+  "messageInput": {
+    "roomUUID": "550e8400-e29b-41d4-a716-446655440000",
+    "text": "Here's the homework assignment",
+    "metadata": [
+      {
+        "name": "image_path",
+        "value": "classroom-file?classroomUUID=room-uuid&filename=homework.pdf"
+      }
+    ]
+  }
+}
+```
+
+<Info>
+File uploads are handled separately via the [File Upload API](/api/files/upload). After uploading, include the file path in the message metadata.
+</Info>
+
+## Subscriptions
+
+### Subscribe to New Messages
+
+Receive real-time updates when new messages are posted to a room.
+
+```graphql
+subscription MessageCreated($topic: String!) {
+  messageCreated(topic: $topic) {
+    id
+    text
+    roomId
+    senderUUID
+    createdAt
+    metadata {
+      name
+      value
+    }
+  }
+}
+```
+
+**Variables:**
+
+```json
+{
+  "topic": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+<Note>
+The `topic` parameter should be the room's UUID to receive messages for that specific room.
+</Note>
+
+**WebSocket Connection Example:**
+
+```javascript
+import { createClient } from 'graphql-ws';
+
+const client = createClient({
+  url: 'ws://localhost:8080/graphql',
+  connectionParams: {
+    authToken: 'Bearer YOUR_JWT_TOKEN'
+  }
+});
+
+const subscription = client.subscribe(
+  {
+    query: `
+      subscription MessageCreated($topic: String!) {
+        messageCreated(topic: $topic) {
+          id
+          text
+          senderUUID
+          createdAt
+        }
+      }
+    `,
+    variables: {
+      topic: '550e8400-e29b-41d4-a716-446655440000'
+    }
+  },
+  {
+    next: (data) => {
+      console.log('New message:', data);
+    },
+    error: (error) => {
+      console.error('Subscription error:', error);
+    },
+    complete: () => {
+      console.log('Subscription completed');
+    }
+  }
+);
+
+// Unsubscribe when done
+subscription.unsubscribe();
+```
+
+**Real-time Event Stream:**
+
+When a message is created, all subscribers receive:
+
+```json
+{
+  "data": {
+    "messageCreated": {
+      "id": "104",
+      "text": "New message just posted!",
+      "roomId": "1",
+      "senderUUID": "user-789",
+      "createdAt": "2024-03-15T10:45:00Z",
+      "metadata": []
+    }
+  }
+}
+```
+
+## Message Metadata
+
+Metadata allows attaching additional information to messages:
+
+<ResponseField name="image_path" type="string">
+  File path for attached documents or images
+</ResponseField>
+
+<ResponseField name="reply_to" type="string">
+  Message ID being replied to (for threaded conversations)
+</ResponseField>
+
+<ResponseField name="edited" type="boolean">
+  Indicates if the message was edited
+</ResponseField>
+
+**Example with Multiple Metadata:**
+
+```json
+{
+  "metadata": [
+    {
+      "name": "image_path",
+      "value": "classroom-file?classroomUUID=room-uuid&filename=doc.pdf"
+    },
+    {
+      "name": "reply_to",
+      "value": "101"
+    }
+  ]
+}
+```
+
+## Pagination Best Practices
+
+<Steps>
+  <Step title="Initial Load">
+    Load the most recent messages with a reasonable page size (e.g., 20-50 messages)
+    
+    ```graphql
+    getMessages(room_uuid: $uuid, index: 0, items: 20)
+    ```
+  </Step>
+  
+  <Step title="Load More">
+    When the user scrolls up, load older messages by incrementing the index
+    
+    ```graphql
+    getMessages(room_uuid: $uuid, index: 20, items: 20)
+    ```
+  </Step>
+  
+  <Step title="Real-time Updates">
+    Use subscriptions to append new messages at the bottom in real-time
+    
+    ```graphql
+    subscription { messageCreated(topic: $uuid) { ... } }
+    ```
+  </Step>
+</Steps>
+
+## Error Handling
+
+Common error scenarios:
+
+<AccordionGroup>
+  <Accordion title="User UUID not provided">
+    The user is not authenticated or the authentication token is invalid.
+    
+    **Solution:** Ensure the user is logged in and include valid authentication headers.
+  </Accordion>
+  
+  <Accordion title="Room not found">
+    The specified room UUID doesn't exist or the user doesn't have access.
+    
+    **Solution:** Verify the room UUID and check user permissions.
+  </Accordion>
+  
+  <Accordion title="Invalid message data">
+    Required fields are missing or contain invalid data.
+    
+    **Solution:** Validate all input fields before sending the mutation.
+  </Accordion>
+</AccordionGroup>

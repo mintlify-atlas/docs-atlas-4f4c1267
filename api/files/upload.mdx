@@ -1,0 +1,418 @@
+---
+title: File Upload
+description: Upload files with automatic processing and organization
+---
+
+The File Upload API supports multiple file types and contexts with automatic processing, resizing for images, and organized storage.
+
+## Upload Profile Image
+
+Upload a profile image with automatic resizing to multiple dimensions.
+
+### Endpoint
+
+```http
+POST /media/upload-profile
+Content-Type: multipart/form-data
+```
+
+### Request
+
+<ParamField body="uploadedFile" type="file" required>
+  The image file to upload (JPEG, PNG, GIF)
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X POST "https://api.schoolr.it/media/upload-profile" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -F "uploadedFile=@profile.jpg"
+```
+
+```javascript
+const formData = new FormData();
+formData.append('uploadedFile', fileInput.files[0]);
+
+const response = await fetch('/media/upload-profile', {
+  method: 'POST',
+  headers: {
+    'Authorization': 'Bearer YOUR_JWT_TOKEN'
+  },
+  body: formData
+});
+
+const result = await response.json();
+console.log('Profile UUID:', result.uuid);
+```
+
+### Response
+
+```json
+{
+  "uuid": "a3b5c7d9-1234-5678-90ab-cdef12345678"
+}
+```
+
+<Info>
+The UUID can be used to construct URLs for different image sizes:
+- Base: `/media/file/profile/{uuid}/base.png`
+- 160px: `/media/file/profile/{uuid}/160.png`
+- 144px: `/media/file/profile/{uuid}/144.png`
+- 70px: `/media/file/profile/{uuid}/70.png`
+- 40px: `/media/file/profile/{uuid}/40.png`
+- 35px: `/media/file/profile/{uuid}/35.png`
+</Info>
+
+### Upload Flow
+
+<Steps>
+  <Step title="Upload Original Image">
+    Send the image file via multipart form data
+  </Step>
+  
+  <Step title="Generate UUID">
+    Server generates a unique identifier for this profile image set
+  </Step>
+  
+  <Step title="Process Image">
+    Original image is loaded and prepared for resizing
+  </Step>
+  
+  <Step title="Create Resized Versions">
+    Six versions are generated in parallel:
+    - Base image (max 500px width)
+    - 160px, 144px, 70px, 40px, 35px thumbnails
+  </Step>
+  
+  <Step title="Upload to Storage">
+    All versions are uploaded to MinIO in the `profile/{uuid}/` folder
+  </Step>
+  
+  <Step title="Return UUID">
+    The UUID is returned to reference this profile image set
+  </Step>
+</Steps>
+
+## Upload Classroom File
+
+Upload a file to a classroom and automatically post it to the classroom chat.
+
+### Endpoint
+
+```http
+POST /media/upload-classroom-file
+Content-Type: multipart/form-data
+```
+
+### Request
+
+<ParamField body="uploadedFile" type="file" required>
+  The file to upload (any type, max 300MB)
+</ParamField>
+
+<ParamField body="classroomSignature" type="string" required>
+  The classroom UUID where the file will be shared
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X POST "https://api.schoolr.it/media/upload-classroom-file" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -F "uploadedFile=@homework.pdf" \
+  -F "classroomSignature=classroom-uuid-123"
+```
+
+```javascript
+const formData = new FormData();
+formData.append('uploadedFile', fileInput.files[0]);
+formData.append('classroomSignature', classroomUUID);
+
+const response = await fetch('/media/upload-classroom-file', {
+  method: 'POST',
+  headers: {
+    'Authorization': 'Bearer YOUR_JWT_TOKEN'
+  },
+  body: formData
+});
+
+const result = await response.json();
+console.log('File uploaded:', result.uuid);
+```
+
+### Response
+
+```json
+{
+  "uuid": "b4c6d8e0-2345-6789-01bc-def123456789"
+}
+```
+
+<Note>
+After successful upload, a chat message is automatically posted to the classroom with the file attachment.
+</Note>
+
+### Automatic Chat Integration
+
+The upload automatically triggers a chat message:
+
+```json
+{
+  "roomId": "classroom-uuid-123",
+  "message": "Nuovo file",
+  "senderUUID": "user-uuid",
+  "messageMetadata": [
+    {
+      "name": "image_path",
+      "value": "classroom-file?classroomUUID=classroom-uuid-123&filename=uuid___homework.pdf"
+    }
+  ]
+}
+```
+
+## Upload Video Lesson Notes
+
+Upload notes or supplementary materials for a video lesson.
+
+### Endpoint
+
+```http
+POST /media/upload-video-lesson-notes
+Content-Type: multipart/form-data
+```
+
+### Request
+
+<ParamField body="uploadedVideoNotes" type="file" required>
+  The notes file to upload (PDF, Word, images, etc.)
+</ParamField>
+
+<ParamField body="videoLessonSignature" type="string" required>
+  The video lesson UUID to associate the notes with
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X POST "https://api.schoolr.it/media/upload-video-lesson-notes" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -F "uploadedVideoNotes=@lecture-notes.pdf" \
+  -F "videoLessonSignature=lesson-uuid-456"
+```
+
+```javascript
+const formData = new FormData();
+formData.append('uploadedVideoNotes', fileInput.files[0]);
+formData.append('videoLessonSignature', lessonUUID);
+
+const response = await fetch('/media/upload-video-lesson-notes', {
+  method: 'POST',
+  headers: {
+    'Authorization': 'Bearer YOUR_JWT_TOKEN'
+  },
+  body: formData
+});
+
+const result = await response.json();
+```
+
+### Response
+
+```json
+{
+  "uuid": "c5d7e9f1-3456-7890-12cd-ef0234567890"
+}
+```
+
+## Upload Multiple Video Lesson Notes
+
+Upload multiple note files for different video lessons in a single request.
+
+### Endpoint
+
+```http
+POST /media/upload-multiple-video-lesson-notes
+Content-Type: multipart/form-data
+```
+
+### Request
+
+<ParamField body="numberOfFiles" type="integer" required>
+  The total number of files being uploaded
+</ParamField>
+
+<ParamField body="uploadedVideoNotes{N}" type="file" required>
+  The Nth file to upload (e.g., uploadedVideoNotes1, uploadedVideoNotes2)
+</ParamField>
+
+<ParamField body="videoLessonSignature{N}" type="string" required>
+  The video lesson UUID for the Nth file
+</ParamField>
+
+### Example Request
+
+```javascript
+const formData = new FormData();
+formData.append('numberOfFiles', '2');
+
+// First file
+formData.append('uploadedVideoNotes1', file1);
+formData.append('videoLessonSignature1', 'lesson-uuid-1');
+
+// Second file
+formData.append('uploadedVideoNotes2', file2);
+formData.append('videoLessonSignature2', 'lesson-uuid-2');
+
+const response = await fetch('/media/upload-multiple-video-lesson-notes', {
+  method: 'POST',
+  headers: {
+    'Authorization': 'Bearer YOUR_JWT_TOKEN'
+  },
+  body: formData
+});
+```
+
+### Response
+
+```json
+{
+  "uuid": "d6e8f0g2-4567-8901-23de-f12345678901"
+}
+```
+
+<Warning>
+All files in a batch upload share the same UUID in the response. Individual file paths are unique.
+</Warning>
+
+## File Size Validation
+
+Before uploading, validate file sizes on the client:
+
+```javascript
+function validateFileSize(file) {
+  const maxSize = 300 * 1024 * 1024; // 300MB in bytes
+  
+  if (file.size > maxSize) {
+    throw new Error(
+      `File size (${(file.size / 1024 / 1024).toFixed(2)}MB) exceeds maximum of 300MB`
+    );
+  }
+  
+  return true;
+}
+
+// Usage
+try {
+  validateFileSize(fileInput.files[0]);
+  // Proceed with upload
+} catch (error) {
+  alert(error.message);
+}
+```
+
+## Upload Progress Tracking
+
+Track upload progress for better UX:
+
+```javascript
+function uploadWithProgress(file, endpoint, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const formData = new FormData();
+    formData.append('uploadedFile', file);
+    
+    xhr.upload.addEventListener('progress', (e) => {
+      if (e.lengthComputable) {
+        const percentComplete = (e.loaded / e.total) * 100;
+        onProgress(percentComplete);
+      }
+    });
+    
+    xhr.addEventListener('load', () => {
+      if (xhr.status === 200) {
+        resolve(JSON.parse(xhr.responseText));
+      } else {
+        reject(new Error(`Upload failed: ${xhr.status}`));
+      }
+    });
+    
+    xhr.addEventListener('error', () => {
+      reject(new Error('Network error'));
+    });
+    
+    xhr.open('POST', endpoint);
+    xhr.setRequestHeader('Authorization', 'Bearer YOUR_JWT_TOKEN');
+    xhr.send(formData);
+  });
+}
+
+// Usage
+uploadWithProgress(
+  file,
+  '/media/upload-classroom-file',
+  (progress) => {
+    console.log(`Upload progress: ${progress.toFixed(2)}%`);
+    progressBar.style.width = `${progress}%`;
+  }
+)
+.then(result => console.log('Upload complete:', result.uuid))
+.catch(error => console.error('Upload failed:', error));
+```
+
+## Error Handling
+
+<AccordionGroup>
+  <Accordion title="204 No Content">
+    **Cause:** No file was included in the request
+    
+    **Solution:** Ensure the file input field has a selected file before submitting
+    
+    ```javascript
+    if (!fileInput.files.length) {
+      alert('Please select a file');
+      return;
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="413 Payload Too Large">
+    **Cause:** File exceeds 300MB limit
+    
+    **Solution:** Compress the file or split into smaller parts
+    
+    ```javascript
+    const maxSize = 300 * 1024 * 1024;
+    if (file.size > maxSize) {
+      alert('File is too large. Please select a file under 300MB.');
+      return;
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="500 Internal Server Error">
+    **Cause:** Server-side processing error (storage failure, image processing error)
+    
+    **Solution:** Retry the upload or check server logs for details
+  </Accordion>
+</AccordionGroup>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Validate Before Upload" icon="check-circle">
+    Check file size and type on the client to provide instant feedback
+  </Card>
+  
+  <Card title="Show Progress" icon="spinner">
+    Display upload progress for files over 10MB to improve UX
+  </Card>
+  
+  <Card title="Handle Failures" icon="triangle-exclamation">
+    Implement retry logic with exponential backoff for network failures
+  </Card>
+  
+  <Card title="Store References" icon="database">
+    Save returned UUIDs and paths to your database for future access
+  </Card>
+</CardGroup>

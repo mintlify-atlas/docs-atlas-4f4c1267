@@ -1,0 +1,229 @@
+---
+title: 'Deployment Overview'
+description: 'Learn how to deploy Schoolr Backend to production environments'
+---
+
+## Introduction
+
+Schoolor Backend is a multi-module Quarkus application built with Maven, Kotlin, and Java. The deployment strategy leverages containerization with Jib, Kubernetes orchestration with Helm charts, and automated database migrations with Liquibase.
+
+## Architecture Components
+
+The Schoolr Backend consists of three microservices:
+
+<CardGroup cols={3}>
+  <Card title="schoolr-datamanagement" icon="database">
+    Main API service with GraphQL, business logic, and integrations
+    
+    **Port:** 8080  
+    **Database:** schoolr (PostgreSQL)
+  </Card>
+  
+  <Card title="schoolr-chat" icon="comments">
+    Chat messaging service with GraphQL and MQTT
+    
+    **Port:** 9090  
+    **Database:** schoolr-chat (PostgreSQL)
+  </Card>
+  
+  <Card title="schoolr-filemanager" icon="folder">
+    File upload/download service with MinIO storage
+    
+    **Port:** 9099  
+    **Storage:** MinIO S3-compatible
+  </Card>
+</CardGroup>
+
+## Technology Stack
+
+- **Build Tool:** Maven 3.8+
+- **Runtime:** Quarkus 3.2.9 (Jakarta EE)
+- **Languages:** Kotlin 1.9.x, Java 11
+- **Database:** PostgreSQL (two separate databases)
+- **Migrations:** Liquibase 4.22.0
+- **Container Builder:** Jib (Google's container image builder)
+- **Orchestration:** Kubernetes with Helm
+- **Authentication:** JWT (SmallRye JWT) + SuperTokens
+- **Messaging:** MQTT (SmallRye Reactive Messaging)
+- **Storage:** MinIO (S3-compatible object storage)
+
+## Deployment Options
+
+### Kubernetes with Helm (Recommended)
+
+The recommended production deployment method uses Helm charts for all three services. Each service includes:
+
+- **Deployment** with health probes (liveness, readiness, startup)
+- **Service** (ClusterIP type)
+- **ConfigMap** for environment configuration
+- **Secret** for sensitive data
+- **Init Job** for Liquibase migrations (datamanagement and chat)
+- **HorizontalPodAutoscaler** for auto-scaling
+- **HTTPRoute** for ingress routing
+
+### Standalone JAR Deployment
+
+For simpler environments, you can build and run the services as standalone JARs:
+
+```bash
+# Build the JAR
+./mvnw package -pl libs/schoolr-libs,libs/schoolr-config,apps/schoolr-datamanagement -am -DskipTests
+
+# Run with production profile
+java -jar apps/schoolr-datamanagement/target/quarkus-app/quarkus-run.jar
+```
+
+<Warning>
+Ensure all required environment variables are set before running in production mode.
+</Warning>
+
+## Container Image Strategy
+
+### Jib Container Builder
+
+Schoolor Backend uses **Jib** for building container images without requiring Docker. Jib is configured via Quarkus:
+
+```xml
+<dependency>
+  <groupId>io.quarkus</groupId>
+  <artifactId>quarkus-container-image-jib</artifactId>
+</dependency>
+```
+
+Key benefits:
+- No Docker daemon required
+- Faster builds with layer optimization
+- Reproducible builds
+- Direct push to container registries
+
+### Image Configuration
+
+Each service defines its container image in `application.yaml`:
+
+```yaml
+quarkus:
+  container-image:
+    registry: gitlab.simultech.it:4567
+    group: schoolr2
+    name: schoolr-back/schoolr-datamanagement
+    tag: ${IMAGE_TAG:tag}
+    username: ${REGISTRY_USERNAME:username}
+    password: ${REGISTRY_PASSWORD:password}
+    insecure: true
+```
+
+### Building Container Images
+
+Build and push container images using Maven:
+
+```bash
+# Build container image locally
+./mvnw package -Dquarkus.container-image.build=true \
+  -pl apps/schoolr-datamanagement -am
+
+# Build and push to registry
+./mvnw package -Dquarkus.container-image.build=true \
+  -Dquarkus.container-image.push=true \
+  -DIMAGE_TAG=1.0.0 \
+  -DREGISTRY_USERNAME=your-username \
+  -DREGISTRY_PASSWORD=your-password \
+  -pl apps/schoolr-datamanagement -am
+```
+
+## Quarkus Profiles
+
+The application uses three Quarkus profiles:
+
+### %dev Profile
+- **Use case:** Local development
+- **CORS:** Localhost origins enabled
+- **Liquibase:** Auto-migrate at startup
+- **JWT:** From SuperTokens development URL
+- **Scheduler:** Disabled by default
+
+### %test Profile
+- **Use case:** Running tests
+- **DevServices:** Enabled for automatic PostgreSQL
+- **MQTT:** Disabled
+- **Scheduler:** Disabled
+
+### %prod Profile
+- **Use case:** Production deployment
+- **CORS:** From `CORS_ORIGINS` environment variable
+- **Liquibase:** Manual migration (via init jobs)
+- **JWT:** From file path (`JWT_KEY_PATH`)
+- **Compression:** HTTP compression enabled
+
+<Note>
+In production, Liquibase migrations run via Kubernetes init jobs before the main application starts.
+</Note>
+
+## Prerequisites
+
+Before deploying to production, ensure you have:
+
+<Steps>
+  <Step title="Infrastructure Services">
+    - PostgreSQL database clusters (two databases: `schoolr` and `schoolr-chat`)
+    - MQTT broker (e.g., Eclipse Mosquitto)
+    - MinIO object storage cluster
+    - SuperTokens authentication service
+  </Step>
+  
+  <Step title="Kubernetes Cluster">
+    - Kubernetes 1.20+ cluster
+    - Helm 3.x installed
+    - kubectl configured
+    - Ingress controller (for HTTPRoute)
+  </Step>
+  
+  <Step title="Container Registry">
+    - Access to container registry (GitLab, Docker Hub, etc.)
+    - Registry credentials configured
+  </Step>
+  
+  <Step title="Secrets and Certificates">
+    - JWT public key PEM file
+    - Database credentials
+    - API keys (Stripe, Novu, WhatsApp, etc.)
+    - TLS certificates for ingress
+  </Step>
+</Steps>
+
+## Environment Variables
+
+Critical environment variables required for production:
+
+| Variable | Description | Example |
+|----------|-------------|----------|
+| `POSTGRES_HOST` | PostgreSQL host | `postgres.example.com` |
+| `POSTGRES_DB` | Database name | `schoolr` or `schoolr-chat` |
+| `POSTGRES_USER` | Database username | `schoolr-user` |
+| `POSTGRES_PASSWORD` | Database password | *secret* |
+| `AUTH_CONNECTION_URI` | SuperTokens URI | `https://supertokens.example.com` |
+| `AUTH_API_KEY` | SuperTokens API key | *secret* |
+| `JWT_KEY_PATH` | Path to JWT public key | `keys/publickey-prod.pem` |
+| `CORS_ORIGINS` | Allowed CORS origins | `https://app.schoolr.net` |
+| `STRIPE_SECRET_KEY` | Stripe API key | `sk_live_...` |
+| `MQTT_HOST` | MQTT broker host | `mqtt.example.com` |
+| `MINIO_HOST` | MinIO endpoint | `http://minio.example.com` |
+
+<Warning>
+Never commit production secrets to version control. Use Kubernetes Secrets or a secrets management solution.
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Kubernetes Deployment" icon="ship" href="/deployment/kubernetes">
+    Deploy with Helm charts to Kubernetes
+  </Card>
+  
+  <Card title="Database Migrations" icon="database" href="/deployment/database-migrations">
+    Manage Liquibase schema migrations
+  </Card>
+  
+  <Card title="Monitoring" icon="chart-line" href="/deployment/monitoring">
+    Configure logging and health checks
+  </Card>
+</CardGroup>

@@ -1,0 +1,353 @@
+---
+title: Configuration
+description: Environment variables and application configuration for Schoolr Backend
+---
+
+Schoolor Backend uses environment variables for configuration. This guide covers setting up your local development environment.
+
+## Environment File Setup
+
+<Steps>
+  <Step title="Create .env File">
+    The repository includes a `.env.example` file (or you should create one). Copy it to create your local configuration:
+
+    ```bash
+    cp .env.example .env
+    ```
+
+    <Warning>
+      Never commit the `.env` file to version control. It should already be in `.gitignore`.
+    </Warning>
+  </Step>
+
+  <Step title="Load Environment Variables">
+    Before running any service, load the environment variables:
+
+    <CodeGroup>
+    ```bash Linux/macOS
+    set -a && source .env && set +a
+    ```
+
+    ```bash Windows (PowerShell)
+    Get-Content .env | ForEach-Object {
+      if ($_ -match '^([^=]+)=(.*)$') {
+        [Environment]::SetEnvironmentVariable($matches[1], $matches[2])
+      }
+    }
+    ```
+    </CodeGroup>
+
+    <Info>
+      Quarkus can also read `.env` files directly with `quarkus.config.locations=.env` configuration.
+    </Info>
+  </Step>
+</Steps>
+
+## Core Configuration
+
+### Database Configuration
+
+Required for **schoolr-datamanagement** and **schoolr-chat**:
+
+```bash .env
+# PostgreSQL - Datamanagement Service
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_DB=schoolr
+POSTGRES_USER=schoolr-user
+POSTGRES_PASSWORD=password
+POSTGRES_SCHEMA=public
+```
+
+<Note>
+  For **schoolr-chat** using a separate database container on port 5433, override with `POSTGRES_PORT=5433` and `POSTGRES_DB=schoolr-chat` when running that service.
+</Note>
+
+#### Default Values (application.yaml)
+
+If environment variables are not set, these defaults are used:
+
+| Variable | Default Value | Service |
+|----------|--------------|----------|
+| `POSTGRES_HOST` | `localhost` | All |
+| `POSTGRES_PORT` | `5432` | All |
+| `POSTGRES_DB` | `schoolr` (datamanagement)<br/>`schoolr-chat` (chat) | Respective |
+| `POSTGRES_USER` | `schoolr-user` | All |
+| `POSTGRES_PASSWORD` | `password` | All |
+| `POSTGRES_SCHEMA` | `public` | All |
+
+### Authentication (SuperTokens)
+
+Required for JWT authentication:
+
+```bash .env
+# SuperTokens Configuration
+AUTH_CONNECTION_URI=https://st-dev-4404b6a0-ff20-11ee-bab3-156e1ba2e437.aws.supertokens.io
+SUPERTOKEN_CDI_VERSION=2.20
+AUTH_API_KEY=KA4oPRv0uMyNAtV=bPCOEUKnRq
+```
+
+<Info>
+  In development mode (`%dev`), JWT public keys are fetched from SuperTokens JWKS endpoint. In production, a local PEM file is used.
+</Info>
+
+### MQTT Configuration
+
+For real-time messaging between services:
+
+```bash .env
+# MQTT Broker
+MQTT_HOST=localhost  # or 34.154.145.9 for external broker
+MQTT_PORT=1883
+MQTT_ENABLED=true
+```
+
+<Tip>
+  Set `MQTT_ENABLED=false` to disable MQTT for local development if not needed.
+</Tip>
+
+### MinIO Configuration
+
+Required only for **schoolr-filemanager**:
+
+```bash .env
+# MinIO Object Storage
+MINIO_HOST=http://127.0.0.1
+MINIO_PORT=9000
+MINIO_USERNAME=minioadmin
+MINIO_PASSWORD=minioadmin
+MINIO_BUCKET=schoolr
+```
+
+#### Default Values (application.yaml)
+
+| Variable | Default Value |
+|----------|---------------|
+| `MINIO_HOST` | `http://127.0.0.1` |
+| `MINIO_PORT` | `9000` |
+| `MINIO_USERNAME` | `orVLknzhRB` |
+| `MINIO_PASSWORD` | `YB9Kql8woUv8KpwG2DIxWI6nJ0Q21qfm1IJSBzlG` |
+| `MINIO_BUCKET` | `schoolr` |
+
+## Service-Specific Configuration
+
+### Datamanagement Service
+
+Additional configuration for the main API service:
+
+```bash .env
+# Application URLs
+SCHOOLR_BASE_URL=http://localhost:3000
+SCHOOLR_BASE_API=http://localhost:8080
+SCHOOLR_DOCUMENT_URL=http://localhost:9099/media
+
+# CORS Origins
+CORS_ORIGINS=http://localhost:3000,http://localhost:3005
+
+# Scheduler
+SCHEDULER_ENABLED=false  # Usually disabled in dev
+
+# WhatsApp Integration
+WHATSAPP_ENABLED=false  # Disable for local dev
+WHATSAPP_API_KEY=your_api_key
+WHATSAPP_APPLICATION_ID=your_app_id
+WHATSAPP_ENDPOINT_SECRET=your_secret
+
+# Stripe
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_ENDPOINT_SECRET=whsec_...
+
+# Novu (Notifications)
+NOVU_API_KEY=your_api_key
+NOVU_SERVER_URL=https://api-notifications.develop.schoolr.net
+
+# Google reCAPTCHA
+RECAPTCHA_SECRET_KEY=your_secret_key
+
+# Fatture in Cloud
+FATTURE_IN_CLOUD_SECRET=your_secret
+
+# SMS Service
+SMS_URL=https://148.251.153.140:8002
+SMS_USERNAME=username
+SMS_PASSWORD=password
+
+# Memoraiz Integration
+MEMORAIZ_PRIVATE_KEY=your_private_key
+```
+
+<Warning>
+  The default values in `application.yaml` are **development/test credentials**. Never use these in production!
+</Warning>
+
+### Chat Service
+
+```bash .env
+# Database (if using port 5433)
+POSTGRES_PORT=5433
+POSTGRES_DB=schoolr-chat
+
+# GraphQL UI
+ENABLE_GRAPHQL_UI=true
+
+# Log Level
+LOG_LEVEL=INFO
+```
+
+### File Manager Service
+
+```bash .env
+# MinIO configuration (see above)
+# MQTT configuration (see above)
+
+# Log Level
+LOG_LEVEL=INFO
+```
+
+## Quarkus Profiles
+
+Schoolor Backend uses Quarkus profiles to manage different environments:
+
+<Tabs>
+  <Tab title="Development (%dev)">
+    **Automatically active** when running with `quarkus:dev`
+
+    Features:
+    - CORS enabled for localhost origins
+    - Liquibase migrations run at startup
+    - JWT from SuperTokens JWKS endpoint
+    - Detailed logging
+    - Live reload enabled
+    - Scheduler usually disabled
+  </Tab>
+
+  <Tab title="Test (%test)">
+    **Automatically active** when running tests
+
+    Features:
+    - Devservices enabled (auto PostgreSQL)
+    - MQTT disabled
+    - Scheduler disabled
+    - Test-specific configurations
+  </Tab>
+
+  <Tab title="Production (%prod)">
+    **Active** when running packaged JAR
+
+    Features:
+    - CORS from `CORS_ORIGINS` env var
+    - Liquibase migrations disabled by default
+    - JWT from local PEM file
+    - HTTP compression enabled
+    - All secrets from environment variables
+  </Tab>
+</Tabs>
+
+## Configuration Priority
+
+Configuration values are loaded in this order (highest priority first):
+
+1. **Environment variables** (set in shell or `.env`)
+2. **System properties** (passed with `-D`)
+3. **application.yaml** profile-specific (`%dev`, `%test`, `%prod`)
+4. **application.yaml** default values
+
+<Info>
+  Environment variables always override values in `application.yaml`.
+</Info>
+
+## Minimal Configuration for Development
+
+To get started quickly with just datamanagement and chat:
+
+```bash .env
+# Required - PostgreSQL
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_USER=schoolr-user
+POSTGRES_PASSWORD=password
+
+# Optional - Disable for initial setup
+MQTT_ENABLED=false
+SCHEDULER_ENABLED=false
+WHATSAPP_ENABLED=false
+```
+
+For **schoolr-chat** on port 5433:
+
+```bash
+export POSTGRES_PORT=5433
+export POSTGRES_DB=schoolr-chat
+# Then run the chat service
+```
+
+## Verification
+
+Verify your configuration is working:
+
+<Steps>
+  <Step title="Check Database Connection">
+    The application logs will show database connection status on startup. Look for:
+
+    ```
+    Liquibase: Successfully acquired change log lock
+    ```
+  </Step>
+
+  <Step title="Test Health Endpoint">
+    Each service exposes a health check:
+
+    ```bash
+    # Datamanagement (8080)
+    curl http://localhost:8080/q/health
+
+    # Chat (9090)
+    curl http://localhost:9090/q/health
+
+    # File Manager (9099)
+    curl http://localhost:9099/q/health
+    ```
+  </Step>
+
+  <Step title="Check GraphQL UI">
+    Access the GraphQL playground:
+
+    - Datamanagement: [http://localhost:8080/q/graphql-ui](http://localhost:8080/q/graphql-ui)
+    - Chat: [http://localhost:9090/q/graphql-ui](http://localhost:9090/q/graphql-ui)
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Database connection failed">
+    - Verify PostgreSQL is running: `docker ps` or check local service
+    - Check credentials match in `.env` and database
+    - Ensure database exists: `psql -U schoolr-user -d schoolr -c "SELECT 1"`
+    - Verify port is correct (5432 for datamanagement, 5433 for chat if using separate containers)
+  </Accordion>
+
+  <Accordion title="Port already in use">
+    - Check what's using the port: `lsof -i :8080` (or 9090, 9099)
+    - Stop the conflicting process or change the port in `application.yaml`
+    - Override with environment variable: `QUARKUS_HTTP_PORT=8081`
+  </Accordion>
+
+  <Accordion title="MinIO connection failed">
+    - Verify MinIO container is running: `docker ps | grep minio`
+    - Check bucket exists: Access http://localhost:9000
+    - Verify credentials in `.env` match MinIO configuration
+  </Accordion>
+
+  <Accordion title="MQTT connection failed">
+    - Set `MQTT_ENABLED=false` if not needed for development
+    - Check broker accessibility: `telnet localhost 1883`
+    - Verify broker is running: `docker ps | grep mqtt`
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<Card title="Running Services" icon="play" href="/getting-started/running-services">
+  Learn how to build and run each service in development mode
+</Card>

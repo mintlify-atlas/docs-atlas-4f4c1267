@@ -1,0 +1,683 @@
+---
+title: 'Monitoring and Health Checks'
+description: 'Configure logging, health checks, and monitoring for Schoolr Backend'
+---
+
+## Introduction
+
+Schoolor Backend provides comprehensive monitoring capabilities through health checks, structured logging, and metrics. This guide covers how to configure and use these features in production.
+
+## Health Checks
+
+Quarkus provides three types of health checks via the SmallRye Health extension:
+
+### Health Check Endpoints
+
+| Endpoint | Purpose | Kubernetes Use |
+|----------|---------|----------------|
+| `/q/health` | Overall health status | General health check |
+| `/q/health/live` | Liveness check | Liveness probe |
+| `/q/health/ready` | Readiness check | Readiness probe |
+| `/q/health/started` | Startup check | Startup probe |
+| `/healthz` | Custom health endpoint | Load balancer health |
+
+### Liveness Check
+
+Indicates if the application is running and should be restarted if failing.
+
+**Request:**
+```bash
+curl http://localhost:8080/q/health/live
+```
+
+**Response:**
+```json
+{
+  "status": "UP",
+  "checks": [
+    {
+      "name": "Database connections health check",
+      "status": "UP"
+    }
+  ]
+}
+```
+
+Kubernetes configuration:
+```yaml
+livenessProbe:
+  httpGet:
+    path: /q/health/live
+    port: 8080
+    scheme: HTTP
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 10
+  failureThreshold: 3
+```
+
+### Readiness Check
+
+Indicates if the application is ready to accept traffic.
+
+**Request:**
+```bash
+curl http://localhost:8080/q/health/ready
+```
+
+**Response:**
+```json
+{
+  "status": "UP",
+  "checks": [
+    {
+      "name": "Database connections health check",
+      "status": "UP"
+    },
+    {
+      "name": "Datasource health check",
+      "status": "UP"
+    }
+  ]
+}
+```
+
+Kubernetes configuration:
+```yaml
+readinessProbe:
+  httpGet:
+    path: /q/health/ready
+    port: 8080
+    scheme: HTTP
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 10
+  failureThreshold: 3
+```
+
+### Startup Check
+
+Provides additional time for slow-starting applications before other probes begin.
+
+Kubernetes configuration:
+```yaml
+startupProbe:
+  httpGet:
+    path: /q/health/started
+    port: 8080
+    scheme: HTTP
+  periodSeconds: 10
+  failureThreshold: 30  # Allows up to 5 minutes for startup
+  timeoutSeconds: 10
+```
+
+### Custom Health Endpoint
+
+Schoolor Backend also provides a custom health endpoint at `/healthz`:
+
+```kotlin
+@Resource
+@Path("/healthz")
+class HealthCheckResource {
+
+    @GET
+    fun getHeathCheck(): Response {
+        return Response.ok(mapOf("status" to "ok")).build()
+    }
+}
+```
+
+**Response:**
+```json
+{
+  "status": "ok"
+}
+```
+
+This endpoint is useful for:
+- Load balancer health checks
+- Simple availability monitoring
+- External monitoring services
+
+## Logging
+
+### Log Configuration
+
+Schoolor Backend uses structured JSON logging in production:
+
+```yaml
+quarkus:
+  log:
+    level: ${LOG_LEVEL:INFO}
+    console:
+      enable: true
+      json: true  # JSON format in production
+      format: "%d{HH:mm:ss} %-5p [%l{2.}] (%t) %s%e%n"
+```
+
+### Log Levels
+
+Configure log levels via environment variables:
+
+```bash
+# Set global log level
+export LOG_LEVEL=INFO
+
+# Available levels: TRACE, DEBUG, INFO, WARN, ERROR
+```
+
+### Logging in Code
+
+Schoolor Backend uses **kotlin-logging** for logging:
+
+```kotlin
+import mu.KotlinLogging
+
+private val logger = KotlinLogging.logger {}
+
+class MyService {
+    fun doSomething() {
+        logger.info { "Processing request" }
+        logger.debug { "Debug information" }
+        logger.error(exception) { "Error occurred" }
+    }
+}
+```
+
+### Structured JSON Logging
+
+In production (`%prod` profile), logs are output as JSON:
+
+```json
+{
+  "timestamp": "2025-03-08T10:30:45.123Z",
+  "level": "INFO",
+  "logger": "it.simultech.dm.service.LessonService",
+  "message": "Lesson created successfully",
+  "thread": "executor-thread-1",
+  "context": {
+    "lessonId": "12345",
+    "userId": "user-789"
+  }
+}
+```
+
+Benefits:
+- Easy parsing by log aggregators (ELK, Splunk, etc.)
+- Structured search and filtering
+- Better integration with observability platforms
+
+### Category-Level Logging
+
+Disable noisy loggers:
+
+```yaml
+quarkus:
+  log:
+    category:
+      "io.smallrye.graphql.schema.helper.NonNullHelper":
+        level: "OFF"
+```
+
+## Collecting Logs in Kubernetes
+
+### View Pod Logs
+
+```bash
+# Stream logs from a pod
+kubectl logs -f deployment/schoolr-datamanagement-deployment -n schoolr-prod
+
+# View logs from all pods in deployment
+kubectl logs -f deployment/schoolr-datamanagement-deployment \
+  --all-containers=true \
+  -n schoolr-prod
+
+# View previous pod logs (after crash)
+kubectl logs deployment/schoolr-datamanagement-deployment \
+  --previous \
+  -n schoolr-prod
+```
+
+### Tail Recent Logs
+
+```bash
+# Last 100 lines
+kubectl logs deployment/schoolr-datamanagement-deployment \
+  --tail=100 \
+  -n schoolr-prod
+
+# Since timestamp
+kubectl logs deployment/schoolr-datamanagement-deployment \
+  --since-time=2025-03-08T10:00:00Z \
+  -n schoolr-prod
+```
+
+### Filter Logs by Level
+
+Using `jq` to filter JSON logs:
+
+```bash
+# Show only ERROR logs
+kubectl logs deployment/schoolr-datamanagement-deployment -n schoolr-prod \
+  | jq 'select(.level=="ERROR")'
+
+# Show logs from specific logger
+kubectl logs deployment/schoolr-datamanagement-deployment -n schoolr-prod \
+  | jq 'select(.logger | contains("LessonService"))'
+```
+
+## Log Aggregation
+
+### ELK Stack (Elasticsearch, Logstash, Kibana)
+
+<Steps>
+  <Step title="Deploy Filebeat DaemonSet">
+    Deploy Filebeat to collect logs from all nodes:
+    
+    ```yaml
+    apiVersion: apps/v1
+    kind: DaemonSet
+    metadata:
+      name: filebeat
+      namespace: kube-system
+    spec:
+      template:
+        spec:
+          containers:
+          - name: filebeat
+            image: docker.elastic.co/beats/filebeat:8.5.0
+            env:
+            - name: ELASTICSEARCH_HOST
+              value: elasticsearch.logging.svc.cluster.local
+            - name: ELASTICSEARCH_PORT
+              value: "9200"
+    ```
+  </Step>
+  
+  <Step title="Configure Log Parsing">
+    Parse JSON logs in Logstash:
+    
+    ```ruby
+    filter {
+      if [kubernetes][labels][app] =~ /^schoolr-/ {
+        json {
+          source => "message"
+        }
+      }
+    }
+    ```
+  </Step>
+  
+  <Step title="Create Kibana Dashboard">
+    - Create index pattern: `schoolr-*`
+    - Build visualizations for error rates, request volumes
+    - Set up alerts for ERROR level logs
+  </Step>
+</Steps>
+
+### Loki (Lightweight Alternative)
+
+Grafana Loki is a lighter alternative to ELK:
+
+```yaml
+# Install Loki with Helm
+helm repo add grafana https://grafana.github.io/helm-charts
+helm install loki grafana/loki-stack \
+  --set promtail.enabled=true \
+  --namespace logging
+```
+
+Query logs in Grafana:
+```logql
+{namespace="schoolr-prod", app="schoolr-datamanagement"} 
+  | json 
+  | level="ERROR"
+```
+
+## Metrics
+
+### Quarkus Metrics
+
+Schoolor Backend includes SmallRye Metrics:
+
+```xml
+<dependency>
+  <groupId>io.quarkus</groupId>
+  <artifactId>quarkus-smallrye-metrics</artifactId>
+</dependency>
+```
+
+### Metrics Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `/q/metrics` | All metrics in Prometheus format |
+| `/q/metrics/application` | Application-specific metrics |
+| `/q/metrics/base` | Base JVM metrics |
+| `/q/metrics/vendor` | Vendor metrics |
+
+**Example Request:**
+```bash
+curl http://localhost:8080/q/metrics
+```
+
+**Example Output:**
+```prometheus
+# HELP jvm_memory_used_bytes The amount of used memory
+# TYPE jvm_memory_used_bytes gauge
+jvm_memory_used_bytes{area="heap"} 2.5678848E8
+jvm_memory_used_bytes{area="nonheap"} 8.9765888E7
+
+# HELP http_server_requests_seconds  
+# TYPE http_server_requests_seconds summary
+http_server_requests_seconds_count{method="GET",uri="/graphql"} 1523
+http_server_requests_seconds_sum{method="GET",uri="/graphql"} 45.234
+```
+
+### Custom Metrics
+
+Enable cache metrics in configuration:
+
+```yaml
+quarkus:
+  cache:
+    caffeine:
+      "account-cache":
+        metrics-enabled: true
+```
+
+Database metrics (development only):
+
+```yaml
+"%dev":
+  quarkus:
+    datasource:
+      metrics:
+        enabled: true
+```
+
+## Prometheus Integration
+
+### Deploy Prometheus
+
+<Steps>
+  <Step title="Install Prometheus Operator">
+    ```bash
+    helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+    helm install prometheus prometheus-community/kube-prometheus-stack \
+      --namespace monitoring \
+      --create-namespace
+    ```
+  </Step>
+  
+  <Step title="Create ServiceMonitor">
+    ```yaml
+    apiVersion: monitoring.coreos.com/v1
+    kind: ServiceMonitor
+    metadata:
+      name: schoolr-datamanagement
+      namespace: schoolr-prod
+    spec:
+      selector:
+        matchLabels:
+          app: schoolr-datamanagement
+      endpoints:
+      - port: http
+        path: /q/metrics
+        interval: 30s
+    ```
+  </Step>
+  
+  <Step title="Apply Configuration">
+    ```bash
+    kubectl apply -f servicemonitor.yaml
+    ```
+  </Step>
+</Steps>
+
+### Prometheus Queries
+
+**Request Rate:**
+```promql
+rate(http_server_requests_seconds_count{app="schoolr-datamanagement"}[5m])
+```
+
+**Error Rate:**
+```promql
+rate(http_server_requests_seconds_count{app="schoolr-datamanagement",status=~"5.."}[5m])
+```
+
+**Memory Usage:**
+```promql
+jvm_memory_used_bytes{app="schoolr-datamanagement",area="heap"}
+```
+
+**Database Connection Pool:**
+```promql
+hikaricp_connections_active{app="schoolr-datamanagement"}
+```
+
+## Grafana Dashboards
+
+### Import Quarkus Dashboard
+
+1. Access Grafana UI
+2. Navigate to Dashboards → Import
+3. Use dashboard ID: **11378** (Quarkus Metrics)
+4. Select Prometheus data source
+5. Customize for Schoolr services
+
+### Custom Dashboard Panels
+
+**Request Throughput:**
+```promql
+sum(rate(http_server_requests_seconds_count[5m])) by (app)
+```
+
+**Response Time (95th percentile):**
+```promql
+histogram_quantile(0.95, 
+  sum(rate(http_server_requests_seconds_bucket[5m])) by (le, app)
+)
+```
+
+**Pod Restarts:**
+```promql
+kube_pod_container_status_restarts_total{namespace="schoolr-prod"}
+```
+
+**Database Query Duration:**
+```promql
+hibernate_query_execution_seconds{app="schoolr-datamanagement"}
+```
+
+## Alerting
+
+### Prometheus AlertManager Rules
+
+```yaml
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: schoolr-alerts
+  namespace: schoolr-prod
+spec:
+  groups:
+  - name: schoolr.rules
+    interval: 30s
+    rules:
+    - alert: HighErrorRate
+      expr: |
+        rate(http_server_requests_seconds_count{status=~"5.."}[5m]) > 0.05
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High error rate detected"
+        description: "{{ $labels.app }} has error rate of {{ $value }}"
+    
+    - alert: PodRestarting
+      expr: |
+        rate(kube_pod_container_status_restarts_total{namespace="schoolr-prod"}[15m]) > 0
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Pod restarting frequently"
+    
+    - alert: HighMemoryUsage
+      expr: |
+        jvm_memory_used_bytes{area="heap"} / jvm_memory_max_bytes{area="heap"} > 0.9
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "High memory usage"
+        description: "{{ $labels.app }} heap usage is {{ $value | humanizePercentage }}"
+    
+    - alert: DatabaseConnectionPoolLow
+      expr: |
+        hikaricp_connections_idle < 2
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Database connection pool running low"
+```
+
+### Notification Channels
+
+Configure AlertManager to send notifications:
+
+```yaml
+route:
+  receiver: 'team-slack'
+  group_by: ['alertname', 'app']
+  group_wait: 10s
+  group_interval: 5m
+  repeat_interval: 3h
+
+receivers:
+- name: 'team-slack'
+  slack_configs:
+  - api_url: 'https://hooks.slack.com/services/YOUR/WEBHOOK/URL'
+    channel: '#alerts'
+    title: 'Schoolr Alert'
+    text: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+```
+
+## Application Performance Monitoring (APM)
+
+### OpenTelemetry Integration
+
+Add OpenTelemetry for distributed tracing:
+
+```xml
+<dependency>
+  <groupId>io.quarkus</groupId>
+  <artifactId>quarkus-opentelemetry</artifactId>
+</dependency>
+```
+
+Configuration:
+```yaml
+quarkus:
+  opentelemetry:
+    enabled: true
+    tracer:
+      exporter:
+        otlp:
+          endpoint: http://jaeger-collector:4317
+```
+
+### Jaeger Tracing
+
+View distributed traces across services:
+- Request flow through datamanagement → chat → filemanager
+- Database query performance
+- External API call duration
+- MQTT message processing
+
+## Monitoring Best Practices
+
+<Check>Set up health checks for all services</Check>
+<Check>Configure appropriate timeout and threshold values</Check>
+<Check>Use structured JSON logging in production</Check>
+<Check>Aggregate logs to a central platform</Check>
+<Check>Monitor key metrics: error rate, latency, throughput</Check>
+<Check>Set up alerts for critical issues</Check>
+<Check>Create dashboards for different stakeholders</Check>
+<Check>Test health check endpoints regularly</Check>
+<Check>Monitor database connection pools</Check>
+<Check>Track JVM memory and GC metrics</Check>
+
+## Troubleshooting Common Issues
+
+### Pod Failing Health Checks
+
+**Symptoms:**
+- Pod in CrashLoopBackOff
+- Readiness probe failing
+
+**Debugging:**
+```bash
+# Check pod events
+kubectl describe pod <pod-name> -n schoolr-prod
+
+# Test health endpoint manually
+kubectl exec -it <pod-name> -n schoolr-prod -- \
+  curl localhost:8080/q/health/ready
+
+# Check application logs
+kubectl logs <pod-name> -n schoolr-prod
+```
+
+### High Memory Usage
+
+**Symptoms:**
+- Pods being OOMKilled
+- Slow response times
+
+**Debugging:**
+```bash
+# Check memory metrics
+kubectl top pod <pod-name> -n schoolr-prod
+
+# Get heap dump for analysis
+kubectl exec <pod-name> -n schoolr-prod -- \
+  jmap -dump:format=b,file=/tmp/heap.hprof 1
+```
+
+**Solutions:**
+- Increase memory limits
+- Tune JVM settings (`-Xmx`, `-Xms`)
+- Analyze heap dump for memory leaks
+- Enable GC logging
+
+### Database Connection Issues
+
+**Symptoms:**
+- Readiness check failing
+- "Connection pool exhausted" errors
+
+**Debugging:**
+```bash
+# Check database connectivity
+kubectl exec -it <pod-name> -n schoolr-prod -- \
+  psql -h $POSTGRES_HOST -U $POSTGRES_USER -d $POSTGRES_DB
+
+# View connection pool metrics
+curl http://localhost:8080/q/metrics | grep hikaricp
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Deployment Overview" icon="book" href="/deployment/overview">
+    Return to deployment overview
+  </Card>
+  
+  <Card title="Kubernetes Deployment" icon="ship" href="/deployment/kubernetes">
+    Review Kubernetes deployment guide
+  </Card>
+</CardGroup>

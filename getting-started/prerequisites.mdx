@@ -1,0 +1,104 @@
+---
+title: Prerequisites
+description: Required tools and dependencies for running Schoolr Backend
+---
+
+Before setting up the Schoolr Backend locally, ensure you have the following tools installed on your machine.
+
+## Required Software
+
+<CardGroup cols={2}>
+  <Card title="JDK" icon="java">
+    Java Development Kit 11 or 17
+  </Card>
+  <Card title="Maven" icon="box">
+    Maven 3.8+ (or use the included `./mvnw` wrapper)
+  </Card>
+  <Card title="PostgreSQL" icon="database">
+    PostgreSQL 15 or compatible version
+  </Card>
+  <Card title="Git" icon="git-alt">
+    For cloning the repository
+  </Card>
+</CardGroup>
+
+## Optional Tools
+
+<CardGroup cols={2}>
+  <Card title="Docker" icon="docker">
+    For running PostgreSQL, MinIO, and MQTT in containers
+  </Card>
+  <Card title="Docker Compose" icon="layer-group">
+    For orchestrating multiple containers (recommended)
+  </Card>
+</CardGroup>
+
+## Verification Commands
+
+Run these commands to verify your installations:
+
+<CodeGroup>
+```bash Java
+java -version
+# Should show version 11 or 17
+```
+
+```bash Maven
+./mvnw -v
+# Verifies Maven wrapper is working
+```
+
+```bash PostgreSQL
+psql --version
+# Shows PostgreSQL version
+```
+
+```bash Docker (Optional)
+docker --version
+docker compose version
+```
+</CodeGroup>
+
+## Version Requirements
+
+| Tool | Minimum Version | Recommended Version | Notes |
+|------|----------------|---------------------|-------|
+| **JDK** | 11 | 11 or 17 | The project uses `maven.compiler.release=11` |
+| **Maven** | 3.8 | 3.8+ | Wrapper `./mvnw` is included in the project |
+| **PostgreSQL** | 12 | 15 | Two separate databases required |
+| **Docker** | 20.x | Latest stable | Optional, for containerized infrastructure |
+
+<Note>
+  The project uses Quarkus 3.2.9 with Kotlin 1.9.x and is configured for Java 11 compatibility.
+</Note>
+
+## System Requirements
+
+### Minimum Hardware
+
+- **CPU**: 2 cores
+- **RAM**: 4 GB (8 GB recommended for running all services)
+- **Disk**: 10 GB free space
+
+### Operating System
+
+The Schoolr Backend can run on:
+
+- **Linux** (recommended)
+- **macOS**
+- **Windows** (with WSL2 recommended)
+
+## Development Tools (Optional)
+
+While not required, these tools can improve your development experience:
+
+- **IntelliJ IDEA** or **Eclipse** - Java IDE with Kotlin support
+- **pgAdmin** or **DBeaver** - PostgreSQL database management
+- **Postman** or **Insomnia** - API testing (GraphQL support)
+- **MinIO Client (mc)** - MinIO bucket management
+
+## Next Steps
+
+<Card title="Local Setup" icon="server" href="/getting-started/local-setup">
+  Set up PostgreSQL, MinIO, and MQTT infrastructure
+</Card>

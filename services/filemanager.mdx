@@ -1,0 +1,452 @@
+---
+title: 'File Manager Service'
+description: 'File storage and management service using MinIO'
+---
+
+## Overview
+
+The File Manager Service handles all file storage operations for the Schoolr platform. It provides REST endpoints for uploading, retrieving, and managing files stored in MinIO object storage. The service supports profile images, classroom files, video lesson notes, and other media assets.
+
+<CardGroup cols={2}>
+  <Card title="MinIO Storage" icon="database">
+    S3-compatible object storage backend
+  </Card>
+  <Card title="REST API" icon="route">
+    RESTful endpoints for file operations
+  </Card>
+  <Card title="Image Processing" icon="image">
+    Automatic image resizing and optimization
+  </Card>
+  <Card title="MQTT Integration" icon="bolt">
+    Publish file upload notifications
+  </Card>
+</CardGroup>
+
+## Service Configuration
+
+### Port and Base URL
+
+- **Port**: `9099`
+- **Base URL**: `http://localhost:9099` (dev)
+- **Media Endpoint**: `/media`
+- **Max Upload Size**: `300MB`
+
+Configuration reference (`application.yaml:2-5`):
+
+```yaml
+quarkus:
+  http:
+    port: 9099
+    limits:
+      max-body-size: 300M
+```
+
+### MinIO Configuration
+
+The service connects to MinIO for object storage:
+
+```yaml
+minio:
+  username: ${MINIO_USERNAME}
+  host: ${MINIO_HOST:http://127.0.0.1}
+  port: ${MINIO_PORT:9000}
+  password: ${MINIO_PASSWORD}
+  bucketname: ${MINIO_BUCKET:schoolr}
+```
+
+<Note>
+MinIO is an S3-compatible object storage system. The service uses it to store all media files, supporting scalable and distributed file storage.
+</Note>
+
+## Key Features
+
+### File Upload
+
+<CardGroup cols={2}>
+  <Card title="Profile Images" icon="user-circle">
+    Upload and resize user profile photos
+  </Card>
+  <Card title="Classroom Files" icon="chalkboard">
+    Share files in virtual classrooms
+  </Card>
+  <Card title="Video Lesson Notes" icon="file-lines">
+    Upload supplementary materials for lessons
+  </Card>
+  <Card title="Batch Upload" icon="layer-group">
+    Upload multiple files at once
+  </Card>
+</CardGroup>
+
+### File Retrieval
+
+The service provides multiple endpoints for retrieving files:
+
+- **Generic file retrieval** - Access any file by path
+- **Classroom files** - Retrieve files by classroom UUID and filename
+- **Video lesson notes** - Access lesson materials by video lesson UUID
+- **Profile images** - Get profile photos with automatic size selection
+- **File listings** - List all files in a folder
+
+### Image Processing
+
+Automatic image resizing for profile photos:
+
+- **Base image**: Original or max 500px width
+- **160px** - Large profile display
+- **144px** - Medium profile display
+- **70px** - Small profile display
+- **40px** - Thumbnail
+- **35px** - Icon size
+
+Reference: `FileManagerResource.kt:143-169`
+
+```kotlin
+listOf(baseImageWidth, 35, 40, 70, 144, 160)
+    .map { resizeWidth ->
+        async {
+            val inputFile = fileManagerUtils.resizeImage(
+                originalImage = originalImage,
+                targetWidth = resizeWidth,
+                formatName = "png"
+            )
+            uploadFile(/* ... */)
+        }
+    }.awaitAll()
+```
+
+## REST API Endpoints
+
+All endpoints are under the `/media` base path.
+
+### Upload Endpoints
+
+| Method | Endpoint | Purpose | Content Type |
+|--------|----------|---------|--------------|
+| POST | `/upload-profile` | Upload user profile image | `multipart/form-data` |
+| POST | `/upload-classroom-file` | Upload file to classroom | `multipart/form-data` |
+| POST | `/upload-video-lesson-notes` | Upload video lesson materials | `multipart/form-data` |
+| POST | `/upload-multiple-video-lesson-notes` | Batch upload lesson notes | `multipart/form-data` |
+
+#### Profile Image Upload
+
+**Request:**
+```
+POST /media/upload-profile
+Content-Type: multipart/form-data
+
+Field: uploadedFile (image file)
+```
+
+**Response:**
+```json
+{
+  "uuid": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+The service creates multiple sizes and stores them in `profile/{uuid}/`:
+- `base.png` - Original or 500px max
+- `35.png`, `40.png`, `70.png`, `144.png`, `160.png` - Resized versions
+
+#### Classroom File Upload
+
+**Request:**
+```
+POST /media/upload-classroom-file
+Content-Type: multipart/form-data
+
+Fields:
+  - uploadedFile (file)
+  - classroomSignature (classroom UUID)
+```
+
+**Response:**
+```json
+{
+  "uuid": "650e8400-e29b-41d4-a716-446655440001"
+}
+```
+
+<Note>
+Uploading a classroom file automatically publishes a chat message notification via MQTT with the file path.
+</Note>
+
+Reference: `FileManagerResource.kt:178-220`
+
+### Retrieval Endpoints
+
+| Method | Endpoint | Purpose | Query Parameters |
+|--------|----------|---------|------------------|
+| GET | `/file` | Get any file by path | `filepath` |
+| GET | `/classroom-file` | Get classroom file | `classroomUUID`, `filename` |
+| GET | `/videolesson-file` | Get video lesson file | `videolessonUUID`, `filename` |
+| GET | `/file/profile/{filename}` | Get profile image (legacy) | Path param |
+| GET | `/file/profile/{uuid}/{filename}` | Get profile image by size | Path params |
+| GET | `/file-list` | List files in folder | `folder` |
+| GET | `/video-lesson-notes-by-subject` | Get notes by video lesson UUIDs | `videoLessonUUIDs` (list) |
+
+#### Generic File Retrieval
+
+**Request:**
+```
+GET /media/file?filepath=classroom_files/abc123/document.pdf
+```
+
+**Response:**
+- Binary file stream
+- Content-Type header set based on file extension
+
+#### Profile Image Retrieval
+
+**Request:**
+```
+GET /media/file/profile/{uuid}/160.png
+```
+
+**Response:**
+- PNG image (160px width)
+- Content-Type: image/png
+
+#### File Listing
+
+**Request:**
+```
+GET /media/file-list?folder=classroom_files/abc123/
+```
+
+**Response:**
+```json
+[
+  "file1.pdf",
+  "file2.png",
+  "document.docx"
+]
+```
+
+### Delete Endpoints
+
+| Method | Endpoint | Purpose | Parameters |
+|--------|----------|---------|------------|
+| DELETE | `/file` | Delete file by path | `filepath` (query) |
+| DELETE | `/delete-video-notes/{videoLessonUUID}/{filename}` | Delete video lesson note | Path params |
+
+**Request:**
+```
+DELETE /media/file?filepath=profile/abc123/base.png
+```
+
+**Response:**
+- 200 OK on success
+- 500 on error
+
+## MQTT Integration
+
+When a file is uploaded to a classroom, the service publishes a notification message via MQTT:
+
+```yaml
+mp:
+  messaging:
+    outgoing:
+      file-messages:
+        enabled: ${mqtt.enabled}
+        type: ${mqtt.connector}
+        host: ${mqtt.host}
+        port: ${mqtt.port}
+```
+
+**Message Format:**
+
+```kotlin
+ChatMessageDto(
+    roomId = roomMd5,
+    message = "Nuovo file",
+    senderUUID = senderId,
+    messageMetadata = listOf(MetadataDto("image_path", imagePath)),
+    uuid = UUID.randomUUID()
+)
+```
+
+**Topic:** `chat-message-filemanager/{roomMd5}`
+
+The Chat Service subscribes to this topic and delivers the message to connected clients.
+
+Reference: `FileManagerResource.kt:329-353`
+
+## File Storage Structure
+
+Files are organized in MinIO with the following structure:
+
+```
+schoolr/                          (bucket)
+├── profile/
+│   └── {uuid}/
+│       ├── base.png
+│       ├── 35.png
+│       ├── 40.png
+│       ├── 70.png
+│       ├── 144.png
+│       └── 160.png
+├── classroom_files/
+│   └── {classroomUUID}/
+│       └── {uuid}___{filename}
+└── video-lesson-notes/
+    └── {videoLessonUUID}/
+        └── {uuid}___{filename}
+```
+
+<Note>
+File names in classroom and video lesson folders are prefixed with a UUID to prevent naming conflicts and ensure uniqueness.
+</Note>
+
+## Technology Stack
+
+<CardGroup cols={3}>
+  <Card title="Quarkus" icon="cube">
+    Java/Kotlin framework
+  </Card>
+  <Card title="Kotlin" icon="code">
+    Primary language (v1.9.24)
+  </Card>
+  <Card title="MinIO SDK" icon="database">
+    Object storage client (v8.5.1)
+  </Card>
+  <Card title="RESTEasy" icon="route">
+    JAX-RS REST framework
+  </Card>
+  <Card title="imgscalr" icon="image">
+    Image resizing library
+  </Card>
+  <Card title="Kotlin Coroutines" icon="bolt">
+    Async file operations
+  </Card>
+</CardGroup>
+
+## Authentication
+
+The service uses JWT-based authentication for protected endpoints:
+
+**Development:**
+```yaml
+mp:
+  jwt:
+    verify:
+      publickey:
+        location: https://dev-{id}.supertokens.io/.well-known/jwks.json
+```
+
+**Production:**
+```yaml
+mp:
+  jwt:
+    verify:
+      publickey:
+        location: ${JWT_KEY_PATH:keys/publickey-prod.pem}
+```
+
+The `IdentityUtil` service extracts the authenticated user's UUID from the JWT token.
+
+Reference: File uploads require authentication to identify the sender (e.g., `FileManagerResource.kt:183`)
+
+## Environment Variables
+
+Key environment variables:
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `MINIO_HOST` | MinIO server host | `http://127.0.0.1` |
+| `MINIO_PORT` | MinIO server port | `9000` |
+| `MINIO_USERNAME` | MinIO access key | - |
+| `MINIO_PASSWORD` | MinIO secret key | - |
+| `MINIO_BUCKET` | Storage bucket name | `schoolr` |
+| `MQTT_HOST` | MQTT broker host | `34.154.145.9` |
+| `MQTT_PORT` | MQTT broker port | `1883` |
+| `MQTT_ENABLED` | Enable MQTT notifications | `true` |
+| `LOG_LEVEL` | Logging level | `INFO` |
+| `AUTH_CONNECTION_URI` | SuperTokens URI | - |
+| `JWT_KEY_PATH` | JWT public key path (prod) | `keys/publickey-prod.pem` |
+| `CORS_ORIGINS` | Allowed CORS origins (prod) | - |
+
+## CORS Configuration
+
+**Development:**
+```yaml
+quarkus:
+  http:
+    cors:
+      methods: GET,PUT,POST,DELETE
+      origins: http://localhost:3000,http://127.0.0.1:3000
+```
+
+**Production:**
+```yaml
+quarkus:
+  http:
+    cors:
+      ~: true
+      methods: GET,PUT,POST,DELETE
+      origins: ${CORS_ORIGINS}
+```
+
+## Source Code Reference
+
+- **Main Directory**: `/apps/schoolr-filemanager/`
+- **Configuration**: `src/main/resources/application.yaml`
+- **REST Resource**: `src/main/kotlin/it/simultech/filemanager/resources/FileManagerResource.kt`
+- **Utils**: `src/main/kotlin/it/simultech/filemanager/utils/`
+  - `MinioConnectionFactory.kt` - MinIO client wrapper
+  - `FileManagerUtils.kt` - File processing utilities
+  - `IdentityUtil.kt` - JWT authentication
+
+## Health Check
+
+The service provides a health check endpoint:
+
+- **Endpoint**: `/healthz`
+- **Method**: GET
+- **Response**: `{"status": "ok"}`
+
+Reference: `src/main/kotlin/it/simultech/filemanager/resources/HealthCheckResource.kt`
+
+## Best Practices
+
+### Uploading Files
+
+1. **Use multipart/form-data** encoding for all file uploads
+2. **Include proper field names**: `uploadedFile` for the file, signature fields for UUIDs
+3. **Handle the UUID response** to reference the uploaded file
+4. **Check file size limits** - max 300MB per upload
+
+### Retrieving Files
+
+1. **Use streaming** - Files are streamed directly from MinIO without loading into memory
+2. **Cache profile images** - Multiple sizes available for different UI needs
+3. **Construct proper paths** - Use the documented folder structure
+
+### Performance
+
+1. **Batch uploads** - Use the multiple upload endpoint when uploading several files
+2. **Async processing** - Profile image resizing happens in parallel
+3. **Direct streaming** - Files stream from MinIO to client without intermediate buffering
+
+## Related Services
+
+<CardGroup cols={2}>
+  <Card title="Data Management" icon="database" href="/services/datamanagement">
+    Main API service for business logic
+  </Card>
+  <Card title="Chat Service" icon="comments" href="/services/chat">
+    Receives file upload notifications
+  </Card>
+</CardGroup>
+
+## Integration Example
+
+To upload and display a classroom file:
+
+1. **Upload the file** via POST to `/media/upload-classroom-file`
+2. **Receive UUID** in response
+3. **File Manager publishes** MQTT message to chat service
+4. **Chat service creates** message with file metadata
+5. **Clients retrieve file** via GET `/media/classroom-file?classroomUUID={uuid}&filename={file}`
+
+This creates a seamless experience where file uploads automatically appear as chat messages in the classroom.

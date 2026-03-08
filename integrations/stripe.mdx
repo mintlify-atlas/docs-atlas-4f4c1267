@@ -1,0 +1,330 @@
+---
+title: "Stripe Integration"
+description: "Payment processing and webhooks with Stripe"
+---
+
+# Stripe Payment Integration
+
+Schoolr Backend integrates with Stripe to process payments for lesson bookings and packet purchases. The integration supports payment intents, webhooks, connected accounts for tutors, and automated payouts.
+
+## Configuration
+
+Stripe requires two key environment variables from your Stripe Dashboard:
+
+<ParamField path="STRIPE_SECRET_KEY" type="string" required>
+  Your Stripe secret API key (starts with `sk_test_` for testing or `sk_live_` for production)
+  
+  **Default (dev):** `sk_test_51NNBJnFS7BVEQn9n...`
+</ParamField>
+
+<ParamField path="STRIPE_ENDPOINT_SECRET" type="string" required>
+  Webhook endpoint secret for signature verification (starts with `whsec_`)
+  
+  **Default (dev):** `whsec_oWEvCx6gQhAGgXGqFb7tjwaSGy4Ek2WP`
+</ParamField>
+
+From `application.yaml:124-126`:
+
+```yaml application.yaml
+stripe:
+  secret_key: ${STRIPE_SECRET_KEY:sk_test_...}
+  endpoint_secret: ${STRIPE_ENDPOINT_SECRET:whsec_...}
+```
+
+<Warning>
+  Never commit your production Stripe keys to version control. Always use environment variables.
+</Warning>
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="Payment Intents" icon="credit-card">
+    Create payment intents for lesson bookings and packet purchases
+  </Card>
+  <Card title="Webhooks" icon="webhook">
+    Handle payment success, refunds, and account updates automatically
+  </Card>
+  <Card title="Connected Accounts" icon="users">
+    Manage tutor payout accounts with Stripe Connect
+  </Card>
+  <Card title="Automated Transfers" icon="money-bill-transfer">
+    Transfer earnings to tutors after completed lessons
+  </Card>
+</CardGroup>
+
+## Payment Flow
+
+### Creating a Payment Intent
+
+Payment intents are created when a student books a lesson or purchases a packet:
+
+```kotlin StripeService.kt
+fun createPaymentIntent(
+    amount: Long,
+    currency: String = "eur",
+    metadata: Map<String, String>
+): PaymentIntent {
+    val params = PaymentIntentCreateParams.builder()
+        .setAmount(amount)
+        .setCurrency(currency)
+        .putAllMetadata(metadata)
+        .build()
+    
+    return PaymentIntent.create(params)
+}
+```
+
+**GraphQL Usage:**
+
+```graphql
+mutation BookLesson {
+  bookLesson(input: {
+    lessonUUID: "550e8400-e29b-41d4-a716-446655440000"
+    studentUUID: "660e8400-e29b-41d4-a716-446655440001"
+  }) {
+    success
+    message
+    paymentIntent {
+      id
+      clientSecret
+      amount
+    }
+  }
+}
+```
+
+### Webhook Events
+
+Stripe sends webhooks to `/stripe/webhook` endpoint for important events. The integration handles:
+
+<AccordionGroup>
+  <Accordion title="charge.succeeded" icon="circle-check">
+    Triggered when a payment is successfully completed.
+    
+    **Actions:**
+    - Updates payment status to COMPLETED
+    - Creates or updates StudentPacket
+    - Confirms lesson booking
+    - Sends confirmation notifications via Novu
+  </Accordion>
+  
+  <Accordion title="charge.refunded" icon="rotate-left">
+    Triggered when a payment is refunded.
+    
+    **Actions:**
+    - Updates payment status to REFUNDED
+    - Cancels associated lesson
+    - Notifies student of refund
+  </Accordion>
+  
+  <Accordion title="account.updated" icon="user-pen">
+    Triggered when a connected account (tutor) is updated.
+    
+    **Actions:**
+    - Updates tutor's Stripe account status
+    - Enables/disables payout eligibility
+  </Accordion>
+</AccordionGroup>
+
+### Webhook Implementation
+
+From `StripeWebhookResource.kt:39-68`:
+
+```kotlin StripeWebhookResource.kt
+@POST
+@Path("/webhook")
+fun handleWebhook(
+    @HeaderParam("Stripe-Signature") signature: String,
+    payload: String
+): Response {
+    val event = try {
+        Webhook.constructEvent(
+            payload,
+            signature,
+            endpointSecret
+        )
+    } catch (e: SignatureVerificationException) {
+        logger.error { "Invalid signature" }
+        return Response.status(400).build()
+    }
+    
+    when (event.type) {
+        "charge.succeeded" -> handleChargeSucceeded(event)
+        "charge.refunded" -> handleChargeRefunded(event)
+        "account.updated" -> handleAccountUpdated(event)
+        else -> logger.info { "Unhandled event: ${event.type}" }
+    }
+    
+    return Response.ok().build()
+}
+```
+
+## Connected Accounts (Stripe Connect)
+
+Tutors need Stripe connected accounts to receive payments. The onboarding flow:
+
+<Steps>
+  <Step title="Create Connected Account">
+    When a tutor registers, create a Stripe Express account:
+    
+    ```kotlin
+    val account = Account.create(AccountCreateParams.builder()
+        .setType(AccountCreateParams.Type.EXPRESS)
+        .setEmail(tutor.email)
+        .setCountry("IT")
+        .setCapabilities(AccountCreateParams.Capabilities.builder()
+            .setCardPayments(AccountCreateParams.Capabilities.CardPayments.builder()
+                .setRequested(true)
+                .build())
+            .setTransfers(AccountCreateParams.Capabilities.Transfers.builder()
+                .setRequested(true)
+                .build())
+            .build())
+        .build())
+    ```
+  </Step>
+  
+  <Step title="Generate Onboarding Link">
+    Create an AccountLink for the tutor to complete onboarding:
+    
+    ```kotlin
+    val accountLink = AccountLink.create(AccountLinkCreateParams.builder()
+        .setAccount(stripeAccountId)
+        .setRefreshUrl("${baseUrl}/tutor/stripe-refresh")
+        .setReturnUrl("${baseUrl}/tutor/dashboard")
+        .setType(AccountLinkCreateParams.Type.ACCOUNT_ONBOARDING)
+        .build())
+    ```
+  </Step>
+  
+  <Step title="Verify Account Status">
+    Check if the account is ready for payouts:
+    
+    ```kotlin
+    val account = Account.retrieve(stripeAccountId)
+    val isPayoutEnabled = account.chargesEnabled && account.payoutsEnabled
+    ```
+  </Step>
+</Steps>
+
+## Automated Payouts
+
+After a lesson is completed, the tutor's earnings are transferred:
+
+```kotlin PaymentService.kt
+fun transferToTutor(lesson: Lesson) {
+    val tutorAccount = lesson.tutor.stripeAccountId ?: return
+    val amount = calculateTutorEarnings(lesson)
+    
+    val transfer = Transfer.create(TransferCreateParams.builder()
+        .setAmount(amount)
+        .setCurrency("eur")
+        .setDestination(tutorAccount)
+        .setTransferGroup("lesson_${lesson.uuid}")
+        .putMetadata("lesson_uuid", lesson.uuid.toString())
+        .putMetadata("tutor_uuid", lesson.tutor.uuid.toString())
+        .build())
+    
+    logger.info { "Transferred €${amount / 100.0} to tutor ${lesson.tutor.uuid}" }
+}
+```
+
+## Testing
+
+Use Stripe test cards for development:
+
+<CardGroup cols={2}>
+  <Card title="Successful Payment" icon="check">
+    **Card:** `4242 4242 4242 4242`
+    
+    **Exp:** Any future date
+    
+    **CVC:** Any 3 digits
+  </Card>
+  <Card title="Declined Payment" icon="xmark">
+    **Card:** `4000 0000 0000 0002`
+    
+    **Exp:** Any future date
+    
+    **CVC:** Any 3 digits
+  </Card>
+</CardGroup>
+
+### Testing Webhooks Locally
+
+Use the Stripe CLI to forward webhooks to your local server:
+
+```bash
+# Install Stripe CLI
+brew install stripe/stripe-cli/stripe
+
+# Login to Stripe
+stripe login
+
+# Forward webhooks to localhost:8080
+stripe listen --forward-to localhost:8080/stripe/webhook
+
+# Trigger test events
+stripe trigger payment_intent.succeeded
+stripe trigger charge.refunded
+```
+
+## Best Practices
+
+<Check>Always verify webhook signatures to ensure requests are from Stripe</Check>
+<Check>Use idempotency keys for payment operations to prevent duplicate charges</Check>
+<Check>Store Stripe IDs (payment intent, transfer, etc.) in your database for reconciliation</Check>
+<Check>Handle webhook retries gracefully (Stripe retries failed webhooks)</Check>
+<Check>Test with Stripe test mode before going to production</Check>
+
+<Warning>
+  Production Stripe accounts require business verification. Start the verification process early.
+</Warning>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Webhook signature verification failed">
+    **Cause:** Incorrect `STRIPE_ENDPOINT_SECRET` or payload modification
+    
+    **Solution:**
+    - Verify your endpoint secret matches the webhook endpoint in Stripe Dashboard
+    - Ensure no middleware modifies the raw request body before verification
+    - Check that the signature header is being passed correctly
+  </Accordion>
+  
+  <Accordion title="Payment intent creation fails">
+    **Cause:** Invalid API key or insufficient permissions
+    
+    **Solution:**
+    - Verify `STRIPE_SECRET_KEY` is set correctly
+    - Check that the key has the necessary permissions
+    - Ensure the amount is in cents (multiply by 100)
+  </Accordion>
+  
+  <Accordion title="Connected account payouts not working">
+    **Cause:** Account onboarding incomplete or payouts disabled
+    
+    **Solution:**
+    - Check `account.chargesEnabled` and `account.payoutsEnabled`
+    - Verify the tutor completed the onboarding flow
+    - Check for any account restrictions in Stripe Dashboard
+  </Accordion>
+</AccordionGroup>
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="Payment API" icon="credit-card" href="/api/payments/overview">
+    GraphQL mutations for payment operations
+  </Card>
+  <Card title="Invoice Generation" icon="file-invoice" href="/api/payments/invoices">
+    Generate invoices with Fatture in Cloud
+  </Card>
+  <Card title="Lesson Booking" icon="calendar" href="/api/lessons/overview">
+    Complete lesson booking flow
+  </Card>
+  <Card title="Webhooks" icon="webhook" href="/api/payments/stripe">
+    Detailed webhook documentation
+  </Card>
+</CardGroup>

@@ -1,0 +1,435 @@
+---
+title: "WhatsApp Integration"
+description: "WhatsApp Business API for instant notifications"
+---
+
+# WhatsApp Business Integration
+
+Schoolr Backend integrates with the WhatsApp Business API to send lesson reminders, booking confirmations, and important alerts directly to students' and tutors' WhatsApp accounts.
+
+## Configuration
+
+WhatsApp integration requires three configuration parameters:
+
+<ParamField path="WHATSAPP_API_KEY" type="string" required>
+  Facebook/Meta access token for WhatsApp Business API
+  
+  **Default (dev):** `EAAT9OPxVlpEBANzLSdaOOl36vEj9ZB...`
+</ParamField>
+
+<ParamField path="WHATSAPP_APPLICATION_ID" type="string" required>
+  WhatsApp Business Account ID
+  
+  **Default:** `109925188728921`
+</ParamField>
+
+<ParamField path="WHATSAPP_ENDPOINT_SECRET" type="string" required>
+  Webhook verification secret
+  
+  **Default (dev):** `o7k4Yzri3ASYb97vrjJopIonm8fs4cHe`
+</ParamField>
+
+<ParamField path="whatsapp.enabled" type="boolean">
+  Enable or disable WhatsApp integration
+  
+  **Default:** `true` (prod), `false` (dev)
+</ParamField>
+
+From `application.yaml:137-141`:
+
+```yaml application.yaml
+whatsapp:
+  enabled: true
+  apikey: ${WHATSAPP_API_KEY:EAAT9OPxVlpEBANzLSdaOOl36vEj9ZB...}
+  applicationId: ${WHATSAPP_APPLICATION_ID:109925188728921}
+  endpointSecret: ${WHATSAPP_ENDPOINT_SECRET:o7k4Yzri3ASYb97vrjJopIonm8fs4cHe}
+```
+
+<Warning>
+  WhatsApp API tokens expire every 60 days. Set up token refresh or use a system user token for production.
+</Warning>
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="Message Templates" icon="file-lines">
+    Pre-approved templates for lesson reminders and confirmations
+  </Card>
+  <Card title="Rich Media" icon="image">
+    Send images, documents, and location information
+  </Card>
+  <Card title="Quick Replies" icon="reply">
+    Interactive buttons for user responses
+  </Card>
+  <Card title="Read Receipts" icon="check-double">
+    Track message delivery and read status
+  </Card>
+</CardGroup>
+
+## Message Templates
+
+WhatsApp requires pre-approved message templates for business-initiated conversations. Common Schoolr templates:
+
+### Lesson Reminder Template
+
+```
+Hello {{1}},
+
+Your lesson with {{2}} is scheduled for {{3}} at {{4}}.
+
+Join here: {{5}}
+
+See you soon!
+Schoolr Team
+```
+
+**Template Name:** `lesson_reminder`  
+**Category:** `UTILITY`  
+**Language:** `en`
+
+### Lesson Confirmed Template
+
+```
+Great news {{1}}! 🎉
+
+Your lesson request has been confirmed by {{2}}.
+
+Date: {{3}}
+Time: {{4}}
+Subject: {{5}}
+
+Prepare your questions and we'll see you online!
+```
+
+**Template Name:** `lesson_confirmed`  
+**Category:** `MARKETING`  
+**Language:** `en`
+
+## Sending Messages
+
+Messages are sent through the WhatsApp Business API client:
+
+### Send Template Message
+
+```kotlin WhatsAppService.kt
+fun sendLessonReminder(
+    phoneNumber: String,
+    studentName: String,
+    tutorName: String,
+    lessonDate: String,
+    lessonTime: String,
+    lessonLink: String
+) {
+    if (!whatsappEnabled) {
+        logger.info { "WhatsApp disabled, skipping message" }
+        return
+    }
+    
+    val message = WhatsAppMessage(
+        messagingProduct = "whatsapp",
+        to = phoneNumber,
+        type = "template",
+        template = WhatsAppTemplate(
+            name = "lesson_reminder",
+            language = WhatsAppLanguage(code = "en"),
+            components = listOf(
+                WhatsAppComponent(
+                    type = "body",
+                    parameters = listOf(
+                        WhatsAppParameter(type = "text", text = studentName),
+                        WhatsAppParameter(type = "text", text = tutorName),
+                        WhatsAppParameter(type = "text", text = lessonDate),
+                        WhatsAppParameter(type = "text", text = lessonTime),
+                        WhatsAppParameter(type = "text", text = lessonLink)
+                    )
+                )
+            )
+        )
+    )
+    
+    httpClient.post("https://graph.facebook.com/v17.0/${applicationId}/messages") {
+        header("Authorization", "Bearer $apiKey")
+        contentType(ContentType.Application.Json)
+        body = message
+    }
+}
+```
+
+### Send Text Message (in active conversation)
+
+Within 24 hours of user message, you can send free-form text:
+
+```kotlin
+fun sendTextMessage(phoneNumber: String, text: String) {
+    val message = mapOf(
+        "messaging_product" to "whatsapp",
+        "to" to phoneNumber,
+        "type" to "text",
+        "text" to mapOf("body" to text)
+    )
+    
+    httpClient.post("https://graph.facebook.com/v17.0/${applicationId}/messages") {
+        header("Authorization", "Bearer $apiKey")
+        body = message
+    }
+}
+```
+
+### Send Location
+
+Share lesson location (for home lessons):
+
+```kotlin
+fun sendLocation(
+    phoneNumber: String,
+    latitude: Double,
+    longitude: Double,
+    name: String,
+    address: String
+) {
+    val message = mapOf(
+        "messaging_product" to "whatsapp",
+        "to" to phoneNumber,
+        "type" to "location",
+        "location" to mapOf(
+            "latitude" to latitude,
+            "longitude" to longitude,
+            "name" to name,
+            "address" to address
+        )
+    )
+    
+    httpClient.post("https://graph.facebook.com/v17.0/${applicationId}/messages") {
+        header("Authorization", "Bearer $apiKey")
+        body = message
+    }
+}
+```
+
+## Webhook Handling
+
+WhatsApp sends webhooks for message status updates and incoming messages:
+
+```kotlin WhatsAppWebhookResource.kt
+@POST
+@Path("/webhook")
+fun handleWebhook(
+    @HeaderParam("X-Hub-Signature-256") signature: String,
+    payload: String
+): Response {
+    // Verify signature
+    if (!verifySignature(payload, signature)) {
+        logger.warn { "Invalid WhatsApp webhook signature" }
+        return Response.status(403).build()
+    }
+    
+    val webhook = parseWebhook(payload)
+    
+    webhook.entry?.forEach { entry ->
+        entry.changes?.forEach { change ->
+            when {
+                change.value?.messages != null -> handleIncomingMessage(change.value.messages)
+                change.value?.statuses != null -> handleStatusUpdate(change.value.statuses)
+            }
+        }
+    }
+    
+    return Response.ok().build()
+}
+
+private fun verifySignature(payload: String, signature: String): Boolean {
+    val hmac = Mac.getInstance("HmacSHA256")
+    hmac.init(SecretKeySpec(endpointSecret.toByteArray(), "HmacSHA256"))
+    val hash = hmac.doFinal(payload.toByteArray())
+    val expected = "sha256=" + hash.joinToString("") { "%02x".format(it) }
+    return expected == signature
+}
+```
+
+From `WhatsAppWebhookResource.kt:34-58`
+
+### Webhook Verification
+
+WhatsApp requires GET endpoint verification:
+
+```kotlin
+@GET
+@Path("/webhook")
+fun verifyWebhook(
+    @QueryParam("hub.mode") mode: String,
+    @QueryParam("hub.verify_token") token: String,
+    @QueryParam("hub.challenge") challenge: String
+): Response {
+    if (mode == "subscribe" && token == endpointSecret) {
+        return Response.ok(challenge).build()
+    }
+    return Response.status(403).build()
+}
+```
+
+## Status Updates
+
+Track message delivery status:
+
+<AccordionGroup>
+  <Accordion title="sent" icon="paper-plane">
+    Message sent to WhatsApp server
+  </Accordion>
+  <Accordion title="delivered" icon="check">
+    Message delivered to recipient's device
+  </Accordion>
+  <Accordion title="read" icon="check-double">
+    Recipient opened the message
+  </Accordion>
+  <Accordion title="failed" icon="xmark">
+    Message delivery failed (invalid number, blocked, etc.)
+  </Accordion>
+</AccordionGroup>
+
+```kotlin
+private fun handleStatusUpdate(statuses: List<WhatsAppStatus>) {
+    statuses.forEach { status ->
+        logger.info { "Message ${status.id} status: ${status.status}" }
+        
+        when (status.status) {
+            "delivered" -> {
+                // Update database: message delivered
+            }
+            "read" -> {
+                // Update database: message read
+            }
+            "failed" -> {
+                logger.error { "Message failed: ${status.errors?.firstOrNull()?.message}" }
+                // Retry or notify admin
+            }
+        }
+    }
+}
+```
+
+## Phone Number Format
+
+WhatsApp requires E.164 format (no spaces, dashes, or plus sign in API calls):
+
+```kotlin
+fun formatPhoneNumber(phone: String): String {
+    // Remove all non-digit characters
+    val digits = phone.replace("[^\\d]".toRegex(), "")
+    
+    // Add country code if missing (default to Italy +39)
+    return if (digits.startsWith("39") && digits.length == 12) {
+        digits
+    } else if (digits.length == 10) {
+        "39$digits"
+    } else {
+        digits
+    }
+}
+
+// Example:
+// Input: "+39 333 123 4567"
+// Output: "393331234567"
+```
+
+## Testing
+
+### WhatsApp Test Numbers
+
+Meta provides test phone numbers for development:
+
+1. Go to Meta Business Manager
+2. Navigate to WhatsApp > API Setup
+3. Add test phone numbers
+4. Verify the numbers with OTP
+
+### Local Webhook Testing
+
+Use ngrok to test webhooks locally:
+
+```bash
+# Start ngrok
+ngrok http 8080
+
+# Copy the HTTPS URL (e.g., https://abc123.ngrok.io)
+# Add webhook in Meta Business Manager:
+# URL: https://abc123.ngrok.io/whatsapp/webhook
+# Verify token: your-endpoint-secret
+```
+
+## Best Practices
+
+<Check>Always use approved templates for business-initiated messages</Check>
+<Check>Store message IDs to track delivery status</Check>
+<Check>Implement retry logic for failed messages</Check>
+<Check>Respect opt-out requests immediately</Check>
+<Check>Monitor rate limits (80 messages/second for Cloud API)</Check>
+
+<Warning>
+  Sending promotional messages without user consent can result in your WhatsApp Business Account being banned.
+</Warning>
+
+## Rate Limits
+
+WhatsApp has tiered messaging limits based on phone number quality:
+
+| Tier | Limit | Requirements |
+|------|-------|-------------|
+| Tier 1 | 1,000 conversations/day | New phone number |
+| Tier 2 | 10,000 conversations/day | 2+ weeks, good quality |
+| Tier 3 | 100,000 conversations/day | High quality rating |
+| Tier 4 | Unlimited | Verified business, excellent quality |
+
+<Info>
+  Quality is based on user feedback (blocks, reports) and message delivery rates.
+</Info>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Messages not sending">
+    **Cause:** Invalid token, incorrect phone format, or template not approved
+    
+    **Solution:**
+    - Verify `WHATSAPP_API_KEY` is valid and not expired
+    - Check phone number format (E.164)
+    - Ensure template is approved in Meta Business Manager
+    - Check API response for specific error codes
+  </Accordion>
+  
+  <Accordion title="Webhook not receiving events">
+    **Cause:** Incorrect webhook URL or verification failed
+    
+    **Solution:**
+    - Verify webhook URL is publicly accessible (use ngrok for local dev)
+    - Check `hub.verify_token` matches your `WHATSAPP_ENDPOINT_SECRET`
+    - Ensure webhook signature verification is working correctly
+    - Check webhook logs in Meta Business Manager
+  </Accordion>
+  
+  <Accordion title="Messages marked as spam">
+    **Cause:** Low quality score or sending too many similar messages
+    
+    **Solution:**
+    - Review your templates for spam-like language
+    - Ensure users opted in to receive messages
+    - Add variety to your messages using template parameters
+    - Monitor quality rating in Meta Business Manager
+  </Accordion>
+</AccordionGroup>
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="Novu Notifications" icon="bell" href="/integrations/novu">
+    Alternative notification channel
+  </Card>
+  <Card title="SMS Integration" icon="mobile" href="/development/environment-variables">
+    SMS service configuration
+  </Card>
+  <Card title="Account Verification" icon="shield-check" href="/api/accounts/mutations">
+    Phone verification flow
+  </Card>
+  <Card title="Lesson Notifications" icon="calendar" href="/api/lessons/overview">
+    Events that trigger WhatsApp messages
+  </Card>
+</CardGroup>

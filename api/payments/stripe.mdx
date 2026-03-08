@@ -1,0 +1,547 @@
+---
+title: 'Stripe Integration'
+description: 'Stripe payment processing, webhooks, and connected accounts for tutor payouts'
+---
+
+## Overview
+
+Schoolor integrates with Stripe for payment processing using:
+- **Payment Intents**: For capturing student payments
+- **Connected Accounts**: For managing tutor payouts
+- **Webhooks**: For real-time payment status updates
+- **Transfers**: For distributing funds to tutors
+
+## Stripe Configuration
+
+### Required Configuration
+
+```properties
+stripe.secret_key=sk_live_xxx
+stripe.endpoint_secret=whsec_xxx
+schoolr.base-url=https://app.schoolr.net
+```
+
+- **secret_key**: Stripe API secret key for server-side operations
+- **endpoint_secret**: Webhook signing secret for event verification
+- **base-url**: Base URL for redirect URLs in onboarding flows
+
+## Payment Intents
+
+### Creating Payment Intents
+
+Payment intents are created for both lesson payments and packet purchases:
+
+#### Packet Payment Intent
+
+```kotlin
+fun createPacketPaymentIntent(
+    studentId: BigInteger, 
+    paymentUuid: UUID
+): PaymentIntent {
+    val paymentTransaction = 
+        paymentTransactionService.getStudentPaymentTransaction(studentId, paymentUuid)
+            ?: throw Exception("Payment Transaction not found")
+    
+    val packetStudent = packetService.getPacketByPaymentId(paymentTransaction.payment.id)
+        ?: throw Exception("StudentPacket not found")
+    
+    return createPaymentIntent(
+        paymentTransaction,
+        description = packetStudent.meta_Description,
+        accountId = studentId,
+        transferGroup = packetStudent.transferGroup,
+        metadata = mapOf(
+            "student_packet_uuid" to packetStudent.uuid.toString()
+        )
+    )
+}
+```
+
+Source: `PaymentService.kt:68-86`
+
+#### Lesson Payment Intent
+
+```kotlin
+fun createLessonPaymentIntent(
+    lessonUuid: UUID, 
+    studentId: BigInteger
+): PaymentIntent? {
+    val lesson = lessonService.getByUUID(lessonUuid) ?: return null
+    
+    val paymentTransaction = lesson.payment?.paymentTransactions
+        ?.find { it.studentId == studentId }
+        ?: throw Exception("Payment Transaction not found")
+    
+    return createPaymentIntent(
+        paymentTransaction,
+        accountId = studentId,
+        captureMethod = PaymentIntentCreateParams.CaptureMethod.MANUAL,
+        description = lesson.meta_Description,
+        transferGroup = lesson.transferGroup,
+        metadata = mapOf("lesson_id" to lessonUuid.toString())
+    )
+}
+```
+
+Source: `PaymentService.kt:50-65`
+
+### Payment Intent Parameters
+
+<ParamField body="amount" type="Long" required>
+  Payment amount in cents (e.g., 5000 = €50.00)
+</ParamField>
+
+<ParamField body="customerId" type="String" required>
+  Stripe customer ID for the student
+</ParamField>
+
+<ParamField body="captureMethod" type="CaptureMethod">
+  - **AUTOMATIC**: Capture immediately upon confirmation (default for packets)
+  - **MANUAL**: Capture later (used for lessons requiring confirmation)
+</ParamField>
+
+<ParamField body="transferGroup" type="String" optional>
+  Groups related transfers together for accounting
+</ParamField>
+
+<ParamField body="metadata" type="Map<String, String>" optional>
+  Custom metadata for tracking (e.g., lesson_id, student_packet_uuid)
+</ParamField>
+
+### Stripe Service Implementation
+
+```kotlin
+fun retrieveOrCreatePaymentIntent(
+    amount: Long,
+    paymentIntentId: String? = null,
+    customerId: String,
+    captureMethod: PaymentIntentCreateParams.CaptureMethod = AUTOMATIC,
+    transferGroup: String? = null,
+    description: String? = null,
+    metadata: Map<String, String>? = null,
+): PaymentIntent {
+    Stripe.apiKey = stripeSecretKey
+    
+    // Retrieve existing PaymentIntent if ID provided
+    if (paymentIntentId != null) {
+        return PaymentIntent.retrieve(paymentIntentId)
+    }
+    
+    // Create new PaymentIntent
+    val params = PaymentIntentCreateParams.builder()
+        .setAmount(amount)
+        .setCurrency("eur")
+        .setCaptureMethod(captureMethod)
+        .putAllMetadata(metadata)
+        .setCustomer(customerId)
+        .setDescription(description)
+        .setTransferGroup(transferGroup)
+        .setAutomaticPaymentMethods(
+            PaymentIntentCreateParams.AutomaticPaymentMethods
+                .builder()
+                .setEnabled(true)
+                .build()
+        )
+        .build()
+    
+    return PaymentIntent.create(params)
+}
+```
+
+Source: `StripeService.kt:272-312`
+
+## Webhook Integration
+
+### Webhook Endpoint
+
+**REST Endpoint**: `POST /webhook`
+
+<ParamField header="Stripe-Signature" type="String" required>
+  Stripe signature for webhook verification
+</ParamField>
+
+<ParamField body="body" type="String" required>
+  Raw webhook payload from Stripe
+</ParamField>
+
+### Webhook Handler Implementation
+
+```kotlin
+@POST
+fun stripeWebhook(
+    @RestHeader("Stripe-Signature") sig: String, 
+    body: String
+): Response {
+    val event: Event?
+    
+    try {
+        event = Webhook.constructEvent(body, sig, stripeEndpointSecret)
+    } catch (exception: SignatureVerificationException) {
+        logger.error { "${exception.message}" }
+        return Response.status(500).build()
+    }
+    
+    val dataObjectDeserializer = event?.dataObjectDeserializer
+    val stripeObject: StripeObject?
+    
+    if (dataObjectDeserializer?.`object`?.isPresent == true) {
+        stripeObject = dataObjectDeserializer.`object`.get()
+    } else {
+        logger.error { "Deserialization failed ${event.type}" }
+        return Response.status(500).build()
+    }
+    
+    logger.info { "[EVENT RECEIVED] -> ${event.type}" }
+    
+    when (event.type) {
+        "charge.succeeded" -> {
+            stripeObject as Charge
+            paymentService.updatePaymentTransactionStatusByPaymentIntent(
+                stripeObject.paymentIntent,
+                stripeObject
+            )
+        }
+        
+        "charge.refunded" -> {
+            stripeObject as Charge
+            paymentService.refundPaymentTransactionStatusByPaymentIntent(
+                stripeObject.paymentIntent,
+                stripeObject
+            )
+        }
+        
+        "account.updated",
+        "person.updated" -> {
+            tutorService.invalidateCacheAccount()
+        }
+        
+        else -> logger.info { "Unhandled event type ${event.type}" }
+    }
+    
+    return Response.status(200).build()
+}
+```
+
+Source: `StripeWebhookResource.kt:32-88`
+
+### Supported Webhook Events
+
+<AccordionGroup>
+  <Accordion title="charge.succeeded">
+    Triggered when a payment is successfully captured.
+    
+    **Actions**:
+    - Update PaymentTransaction status to succeeded
+    - Store receipt URL
+    - Update lesson status to PENDING
+    - Send notifications to students and tutors
+    - Mark StudentPacket as DONE if all payments complete
+    
+    **Payload Example**:
+    ```json
+    {
+      "id": "ch_xxx",
+      "object": "charge",
+      "amount": 5000,
+      "payment_intent": "pi_xxx",
+      "receipt_url": "https://pay.stripe.com/receipts/xxx",
+      "status": "succeeded"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="charge.refunded">
+    Triggered when a charge is refunded (full or partial).
+    
+    **Actions**:
+    - Update PaymentTransaction with refund status
+    - Store refunded amount
+    - Update Stripe payment status
+    
+    **Payload Example**:
+    ```json
+    {
+      "id": "ch_xxx",
+      "object": "charge",
+      "amount": 5000,
+      "amount_refunded": 5000,
+      "payment_intent": "pi_xxx",
+      "refunded": true,
+      "status": "refunded"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="account.updated / person.updated">
+    Triggered when a connected account or person is updated.
+    
+    **Actions**:
+    - Invalidate tutor account cache
+    - Refresh account information
+    
+    **Use Case**: When tutors update their bank account or personal information
+  </Accordion>
+</AccordionGroup>
+
+### Webhook Security
+
+Webhook events are verified using Stripe's signature verification:
+
+```kotlin
+try {
+    event = Webhook.constructEvent(body, sig, stripeEndpointSecret)
+} catch (exception: SignatureVerificationException) {
+    logger.error { "${exception.message}" }
+    return Response.status(500).build()
+}
+```
+
+<Warning>
+  Always verify webhook signatures to prevent unauthorized webhook injection attacks.
+</Warning>
+
+## Connected Accounts (Tutors)
+
+### Creating Connected Accounts
+
+Tutors are set up as Stripe Connected Accounts (CUSTOM type) to receive payouts:
+
+```kotlin
+fun createConnectedAccount(args: ConnectedAccountCreateDto): Account {
+    Stripe.apiKey = stripeSecretKey
+    
+    val accountCreateParams = AccountCreateParams
+        .builder()
+        .setCountry("IT")
+        .setType(AccountCreateParams.Type.CUSTOM)
+        .setEmail(args.email)
+        .setBusinessType(AccountCreateParams.BusinessType.INDIVIDUAL)
+        .setBusinessProfile(
+            AccountCreateParams.BusinessProfile.builder()
+                .setName("${args.firstName} ${args.lastName}")
+                .setUrl("www.schoolr.net")
+                .setMcc("8299")  // Educational services
+                .build()
+        )
+        .setDefaultCurrency("EUR")
+        .setIndividual(
+            AccountCreateParams.Individual
+                .builder()
+                .setFirstName(args.firstName)
+                .setLastName(args.lastName)
+                .setEmail(args.email)
+                .setPhone(args.phone)
+                .setDob(
+                    AccountCreateParams.Individual.Dob
+                        .builder()
+                        .setDay(args.dob.dayOfMonth.toLong())
+                        .setMonth(args.dob.monthValue.toLong())
+                        .setYear(args.dob.year.toLong())
+                        .build()
+                )
+                .setAddress(
+                    AccountCreateParams.Individual.Address
+                        .builder()
+                        .setCountry("IT")
+                        .setState(args.province)
+                        .setCity(args.city)
+                        .setPostalCode(args.postalCode)
+                        .setLine1(args.address)
+                        .build()
+                )
+                .build()
+        )
+        .setCapabilities(
+            AccountCreateParams.Capabilities
+                .builder()
+                .setCardPayments(
+                    AccountCreateParams.Capabilities.CardPayments
+                        .builder()
+                        .setRequested(true)
+                        .build()
+                )
+                .setTransfers(
+                    AccountCreateParams.Capabilities.Transfers
+                        .builder()
+                        .setRequested(true)
+                        .build()
+                )
+                .build()
+        )
+        .setSettings(
+            AccountCreateParams.Settings.builder()
+                .setPayouts(
+                    AccountCreateParams.Settings.Payouts.builder()
+                        .setSchedule(
+                            AccountCreateParams.Settings.Payouts.Schedule.builder()
+                                .setInterval(MONTHLY)
+                                .setMonthlyAnchor(7L)  // Payout on 7th of month
+                                .build()
+                        ).build()
+                ).build()
+        )
+        .setTosAcceptance(
+            AccountCreateParams.TosAcceptance
+                .builder()
+                .setDate(System.currentTimeMillis() / 1000L)
+                .setIp(args.ipAddress)
+                .build()
+        )
+        .build()
+    
+    val stripeAccount = Account.create(accountCreateParams)
+    
+    // Add bank account
+    stripeAccount.externalAccounts.create(
+        mapOf(
+            "external_account" to mapOf(
+                "default_for_currency" to true,
+                "object" to "bank_account",
+                "country" to "it",
+                "currency" to "eur",
+                "account_holder_name" to "${args.lastName} ${args.firstName}",
+                "account_holder_type" to "individual",
+                "account_number" to args.iban
+            )
+        )
+    )
+    
+    return stripeAccount
+}
+```
+
+Source: `StripeService.kt:26-134`
+
+### Transfer to Connected Accounts
+
+Transferring funds to tutor accounts:
+
+```kotlin
+fun transferToConnectedAccount(
+    connectedAccountId: String,
+    amount: Long,
+    description: String,
+    transferGroup: String? = null,
+    metadata: Map<String, String>? = mapOf(),
+): Transfer {
+    Stripe.apiKey = stripeSecretKey
+    
+    val transferCreateParams = TransferCreateParams
+        .builder()
+        .setAmount(amount)
+        .setCurrency("EUR")
+        .setDestination(connectedAccountId)
+        .setDescription(description)
+        .setTransferGroup(transferGroup)
+        .putAllMetadata(metadata)
+        .build()
+    
+    val transferResult = Transfer.create(transferCreateParams)
+    
+    logger.info { "[TRANSFER] ${transferResult.id} ${transferResult.amount}" }
+    
+    return transferResult
+}
+```
+
+Source: `StripeService.kt:314-338`
+
+### Manual Payouts
+
+Trigger manual payouts to tutors:
+
+```kotlin
+fun manualPayout(
+    amount: Long,
+    stripeAccountId: String,
+    description: String? = "",
+    statementDescription: String? = "",
+): Payout? {
+    Stripe.apiKey = stripeSecretKey
+    
+    val params = PayoutCreateParams
+        .builder()
+        .setAmount(amount)
+        .setCurrency("EUR")
+        .setDescription(description)
+        .setStatementDescriptor(statementDescription)
+        .build()
+    
+    val options = RequestOptions
+        .builder()
+        .setStripeAccount(stripeAccountId)
+        .build()
+    
+    return Payout.create(params, options)
+}
+```
+
+Source: `StripeService.kt:391-414`
+
+## Payment Capture
+
+### Manual Capture (Lessons)
+
+Lessons use manual capture to allow confirmation before charging:
+
+```kotlin
+fun completePayment(amount: Long, paymentIntentId: String): PaymentIntent {
+    Stripe.apiKey = stripeSecretKey
+    
+    val intent = PaymentIntent.retrieve(paymentIntentId)
+    
+    val params = PaymentIntentCaptureParams.builder()
+        .setAmountToCapture(amount)
+        .build()
+    
+    return intent.capture(params)
+}
+```
+
+Source: `StripeService.kt:342-352`
+
+### Cancel Payment
+
+```kotlin
+fun cancelPayment(paymentIntentId: String): PaymentIntent {
+    Stripe.apiKey = stripeSecretKey
+    val intent = PaymentIntent.retrieve(paymentIntentId)
+    return intent.cancel()
+}
+```
+
+Source: `StripeService.kt:355-361`
+
+## Testing
+
+### Test Webhook Locally
+
+Use Stripe CLI to forward webhooks to your local environment:
+
+```bash
+stripe listen --forward-to localhost:8080/webhook
+```
+
+### Trigger Test Events
+
+```bash
+# Test successful charge
+stripe trigger charge.succeeded
+
+# Test refund
+stripe trigger charge.refunded
+
+# Test account update
+stripe trigger account.updated
+```
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Invoice Generation" icon="file-invoice" href="/api/payments/invoices">
+    Learn about automated invoicing
+  </Card>
+  <Card title="Payments Overview" icon="credit-card" href="/api/payments/overview">
+    Back to payments overview
+  </Card>
+</CardGroup>
